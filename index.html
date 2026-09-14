@@ -1,0 +1,1775 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-100 text-slate-800">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23059669'/%3E%3Crect x='13' y='15' width='32' height='9' rx='4.5' fill='white'/%3E%3Crect x='13' y='28' width='42' height='9' rx='4.5' fill='white' opacity='0.85'/%3E%3Crect x='13' y='41' width='22' height='9' rx='4.5' fill='white' opacity='0.7'/%3E%3C/svg%3E" />
+  <title>Resource Manager</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0fdf4',
+              100: '#dcfce7',
+              500: '#22c55e',
+              600: '#16a34a',
+              700: '#15803d',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Prevent macOS trackpad / Magic Mouse page swipe back/forward */
+    html, body {
+      overscroll-behavior-x: contain;
+      overscroll-behavior-y: none;
+    }
+
+    #timeline-container {
+      overscroll-behavior-x: contain;
+      overscroll-behavior-y: auto;
+      scrollbar-gutter: stable;
+    }
+
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+
+    /* SOLID GRAY OFF-DAYS & WEEKENDS */
+    .weekend-bg {
+      background-color: #e2e8f0 !important;
+      background-image: repeating-linear-gradient(45deg, #cbd5e1 0, #cbd5e1 1px, transparent 0, transparent 50%);
+      background-size: 8px 8px;
+    }
+    .holiday-bg {
+      background-color: #f1f5f9 !important;
+      background-image: repeating-linear-gradient(-45deg, #fca5a5 0, #fca5a5 2px, transparent 0, transparent 8px);
+    }
+    .vacation-bg {
+      background-image: repeating-linear-gradient(135deg, rgba(224, 231, 255, 0.6), rgba(224, 231, 255, 0.6) 10px, rgba(199, 210, 254, 0.5) 10px, rgba(199, 210, 254, 0.5) 20px);
+    }
+
+    .grid-cell-selecting {
+      background-color: rgba(34, 197, 94, 0.25) !important;
+    }
+    .header-cell-selecting {
+      background-color: rgba(243, 244, 246, 0.9) !important;
+      outline: 2px dashed #f43f5e;
+    }
+
+    /* DEADLINE MARKERS */
+    .deadline-marker-client {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background-color: #ef4444;
+      z-index: 25;
+      cursor: grab;
+    }
+    .deadline-marker-internal {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background-color: #f59e0b;
+      z-index: 25;
+      cursor: grab;
+    }
+
+    /* RESIZE HANDLES */
+    .resize-handle-left {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 8px;
+      cursor: w-resize;
+      z-index: 20;
+    }
+    .resize-handle-right {
+      position: absolute;
+      right: 0;
+      top: 0;
+      bottom: 0;
+      width: 8px;
+      cursor: e-resize;
+      z-index: 20;
+    }
+    .task-block-dragging {
+      opacity: 0.6;
+      cursor: grabbing !important;
+    }
+
+    [contenteditable="true"].inline-editing {
+      outline: 2px dashed #10b981;
+      outline-offset: 2px;
+      border-radius: 4px;
+      background: #ecfdf5;
+      cursor: text;
+    }
+
+    .app-toast {
+      position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
+      background: #1e293b; color: #fff; border-radius: 999px; padding: 10px 18px;
+      font-size: 12px; font-weight: 600; letter-spacing: .02em; display: flex;
+      align-items: center; gap: 14px; z-index: 700; box-shadow: 0 10px 30px -8px rgba(0,0,0,.4);
+      animation: toastin .2s ease;
+    }
+    .app-toast .toast-undo {
+      color: #6ee7b7; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; font-size: 11px;
+    }
+    .app-toast .toast-undo:hover { color: #fff; text-decoration: underline; }
+    @keyframes toastin { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
+  </style>
+</head>
+<body class="h-full flex flex-col font-sans antialiased bg-slate-100 text-slate-800 overflow-hidden select-none">
+
+  <!-- -->
+  <!-- HEADER NAVIGATION -->
+  <header class="flex-none bg-white border-b border-slate-200 px-6 py-3 flex flex-wrap items-center justify-between gap-3 z-30 shadow-sm">
+    <div class="flex items-center space-x-4">
+      <div class="flex items-center space-x-2">
+        <div class="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center text-white font-bold shadow">
+          <i data-lucide="layers" class="w-5 h-5"></i>
+        </div>
+        <div>
+          <h1 class="text-base font-bold tracking-tight text-slate-900 leading-none">Resource Manager</h1>
+          <span class="text-[10px] font-medium text-slate-400">Team Capacity & Visual Timeline</span>
+        </div>
+      </div>
+
+      <div class="h-5 w-px bg-slate-200"></div>
+
+      <!-- View Toggle Switcher -->
+      <div class="bg-slate-100 p-1 rounded-lg flex items-center border border-slate-200">
+        <button id="btn-view-people" onclick="setViewMode('people')" class="px-3 py-1 rounded-md text-xs font-semibold transition-all flex items-center space-x-1.5 bg-white text-slate-800 shadow-sm border border-slate-200">
+          <i data-lucide="users" class="w-3.5 h-3.5 text-emerald-600"></i>
+          <span>People View</span>
+        </button>
+        <button id="btn-view-projects" onclick="setViewMode('projects')" class="px-3 py-1 rounded-md text-xs font-semibold transition-all flex items-center space-x-1.5 text-slate-600 hover:text-slate-900">
+          <i data-lucide="folder-kanban" class="w-3.5 h-3.5 text-slate-500"></i>
+          <span>Project View</span>
+        </button>
+      </div>
+
+      <!-- Timeline Zoom Controls (14d, 21d, 30d, 45d) -->
+      <div class="bg-slate-100 p-1 rounded-lg flex items-center border border-slate-200 text-xs font-medium">
+        <span class="px-2 text-[10px] uppercase font-bold text-slate-400">Range (fits screen):</span>
+        <button id="zoom-14" onclick="setZoomLevel(14)" class="px-2.5 py-1 rounded text-slate-600 hover:text-slate-900 font-bold bg-white text-slate-900 shadow-sm border border-slate-200">14 Days</button>
+        <button id="zoom-21" onclick="setZoomLevel(21)" class="px-2.5 py-1 rounded text-slate-600 hover:text-slate-900">21 Days</button>
+        <button id="zoom-30" onclick="setZoomLevel(30)" class="px-2.5 py-1 rounded text-slate-600 hover:text-slate-900">30 Days</button>
+        <button id="zoom-45" onclick="setZoomLevel(45)" class="px-2.5 py-1 rounded text-slate-600 hover:text-slate-900">45 Days</button>
+      </div>
+    </div>
+
+    <div class="flex items-center space-x-3">
+      <!-- Project Status Filter -->
+      <div class="flex items-center space-x-1 bg-slate-100 px-2 py-1 rounded-lg border border-slate-200">
+        <i data-lucide="filter" class="w-3.5 h-3.5 text-slate-500"></i>
+        <select id="project-status-filter" onchange="filterProjectStatus(this.value)" class="bg-transparent text-xs font-medium text-slate-700 border-none focus:outline-none cursor-pointer">
+          <option value="ALL">All Project Statuses</option>
+          <option value="Active">Active Projects</option>
+          <option value="Follow Up">Follow Up (External)</option>
+          <option value="On Hold">On Hold</option>
+          <option value="Done">Completed</option>
+        </select>
+      </div>
+
+      <!-- Date Window Controls -->
+      <div class="flex items-center bg-slate-100 rounded-lg border border-slate-200 p-1">
+        <button onclick="shiftWindow(-7)" class="p-1 hover:bg-white rounded text-slate-600 hover:text-slate-900 transition shadow-sm">
+          <i data-lucide="chevron-left" class="w-4 h-4"></i>
+        </button>
+        <button onclick="resetToToday()" class="px-2.5 py-1 text-xs font-semibold text-slate-700 hover:text-slate-900">Today</button>
+        <button onclick="shiftWindow(7)" class="p-1 hover:bg-white rounded text-slate-600 hover:text-slate-900 transition shadow-sm">
+          <i data-lucide="chevron-right" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <button onclick="openPeopleModal()" class="px-3 py-1.5 text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 rounded-lg border border-slate-200 transition flex items-center space-x-1.5 shadow-sm">
+        <i data-lucide="user-cog" class="w-3.5 h-3.5 text-emerald-600"></i>
+        <span>People</span>
+      </button>
+
+      <button onclick="openVacationModal()" class="px-3 py-1.5 text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 rounded-lg border border-slate-200 transition flex items-center space-x-1.5 shadow-sm">
+        <i data-lucide="palmtree" class="w-3.5 h-3.5 text-indigo-500"></i>
+        <span>Vacations</span>
+      </button>
+
+      <button onclick="openHolidayModal()" class="px-3 py-1.5 text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 rounded-lg border border-slate-200 transition flex items-center space-x-1.5 shadow-sm">
+        <i data-lucide="calendar-off" class="w-3.5 h-3.5 text-rose-500"></i>
+        <span>Holidays</span>
+      </button>
+
+      <button onclick="openTaskModal()" class="px-3.5 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition flex items-center space-x-1.5 shadow">
+        <i data-lucide="plus" class="w-4 h-4"></i>
+        <span>New Task</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- -->
+  <!-- MAIN TIMELINE CANVAS -->
+  <main class="flex-1 overflow-hidden flex flex-col relative bg-slate-100">
+    <div id="timeline-container" class="flex-1 overflow-auto relative">
+      <div id="timeline-grid" class="inline-block min-w-full align-top">
+        <!-- Dynamically rendered -->
+      </div>
+    </div>
+  </main>
+
+  <!-- -->
+  <!-- TASK / BOOKING MODAL -->
+  <div id="task-modal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-white border border-slate-200 rounded-xl w-full max-w-lg p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-slate-200 pb-3">
+        <h3 id="modal-title" class="text-base font-bold text-slate-900">New Task Booking</h3>
+        <button onclick="closeTaskModal()" class="text-slate-400 hover:text-slate-600">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form id="task-form" onsubmit="saveTask(event)" class="space-y-4">
+        <input type="hidden" id="task-id">
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Task / Deliverable Title (Primary Header)</label>
+          <input type="text" id="task-name" required placeholder="e.g. Kicking off the new brief" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-600 focus:bg-white">
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Project Name</label>
+            <input type="text" id="task-project" list="project-names-list" required placeholder="e.g. Summer Campaign" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-600 focus:bg-white">
+            <datalist id="project-names-list"></datalist>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Project Status</label>
+            <select id="task-project-status" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-600 focus:bg-white">
+              <option value="Active">Active</option>
+              <option value="Follow Up">Follow Up (External)</option>
+              <option value="On Hold">On Hold</option>
+              <option value="Done">Completed</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Assignee</label>
+            <select id="task-assignee" required class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-600 focus:bg-white">
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Task Accent Color</label>
+            <input type="color" id="task-color" value="#2563eb" class="w-full h-9 bg-slate-50 border border-slate-300 rounded-lg p-1 cursor-pointer">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Start Date</label>
+            <input type="date" id="task-start" required class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-600 focus:bg-white">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">End Date</label>
+            <input type="date" id="task-end" required class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-600 focus:bg-white">
+          </div>
+        </div>
+
+        <!-- DEADLINE SETTINGS -->
+        <div class="bg-slate-50 border border-slate-200 p-3 rounded-lg space-y-3">
+          <div class="flex items-center justify-between">
+            <label class="text-xs font-bold text-slate-800 flex items-center space-x-1.5">
+              <i data-lucide="flag" class="w-4 h-4 text-rose-500"></i>
+              <span>Attach Key Milestone Deadline?</span>
+            </label>
+            <input type="checkbox" id="task-has-deadline" onchange="toggleDeadlineInput(this.checked)" class="w-4 h-4 text-emerald-600 rounded cursor-pointer">
+          </div>
+          
+          <div id="deadline-date-wrapper" class="hidden space-y-2 pt-2 border-t border-slate-200">
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block text-[10px] font-bold text-slate-600 mb-1">Deadline Type</label>
+                <select id="task-deadline-type" class="w-full bg-white border border-slate-300 rounded px-2 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-emerald-600">
+                  <option value="CLIENT">Client Deadline (Red Flag)</option>
+                  <option value="INTERNAL">Internal Check-in (Amber Diamond)</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-600 mb-1">Exact Deadline Date</label>
+                <input type="date" id="task-deadline-date" class="w-full bg-white border border-slate-300 rounded px-2 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-emerald-600">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Daily Hours & Time Predictor Helper -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Daily Allocated Hours</label>
+          <div class="flex space-x-2">
+            <input type="number" id="task-hours" min="1" max="24" value="4" required class="flex-1 bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-600 focus:bg-white">
+            <button type="button" onclick="toggleEstimationChecker()" class="px-3 py-2 text-xs font-semibold bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 rounded-lg transition flex items-center space-x-1">
+              <i data-lucide="sparkles" class="w-3.5 h-3.5 text-indigo-600"></i>
+              <span>Estimate Reality Check</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="estimation-checker-panel" class="hidden bg-indigo-50/70 border border-indigo-200 p-3.5 rounded-lg space-y-3">
+          <div class="flex items-center justify-between border-b border-indigo-200/60 pb-1.5">
+            <span class="text-xs font-bold text-indigo-900 flex items-center space-x-1">
+              <i data-lucide="brain" class="w-3.5 h-3.5 text-indigo-600"></i>
+              <span>Time Reality Check Helper</span>
+            </span>
+            <span class="text-[10px] text-indigo-600 font-medium">Add safety buffers</span>
+          </div>
+
+          <div class="space-y-2 text-xs text-indigo-950">
+            <label class="flex items-center space-x-2 cursor-pointer">
+              <input type="checkbox" id="check-client-reviews" onchange="calculateTimeRecommendation()" class="rounded text-indigo-600">
+              <span>Includes feedback & revisions? (+25% buffer)</span>
+            </label>
+            <label class="flex items-center space-x-2 cursor-pointer">
+              <input type="checkbox" id="check-new-task" onchange="calculateTimeRecommendation()" class="rounded text-indigo-600">
+              <span>Is this a new task type or technology? (+30% buffer)</span>
+            </label>
+            <label class="flex items-center space-x-2 cursor-pointer">
+              <input type="checkbox" id="check-interrup" onchange="calculateTimeRecommendation()" class="rounded text-indigo-600">
+              <span>Will you be multitasking or in meetings? (+20% buffer)</span>
+            </label>
+          </div>
+
+          <div id="recommendation-result" class="text-xs bg-white p-2 rounded border border-indigo-200 text-indigo-900 flex items-center justify-between font-medium">
+            <span>Suggested Daily Estimate: <b id="rec-hours" class="text-indigo-700">4h</b></span>
+            <button type="button" onclick="applyTimeRecommendation()" class="px-2 py-1 bg-indigo-600 text-white text-[10px] font-bold rounded hover:bg-indigo-700 transition">
+              Apply Suggestion
+            </button>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between pt-3 border-t border-slate-200">
+          <button type="button" id="btn-delete-task" onclick="deleteTask()" class="px-3 py-1.5 text-xs font-semibold text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-lg transition hidden">Delete Task</button>
+          <div class="flex items-center space-x-2 ml-auto">
+            <button type="button" onclick="closeTaskModal()" class="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900">Cancel</button>
+            <button type="submit" class="px-4 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition shadow">Save Task</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- PEOPLE MODAL -->
+  <div id="people-modal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-white border border-slate-200 rounded-xl w-full max-w-lg p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-slate-200 pb-3">
+        <h3 class="text-base font-bold text-slate-900 flex items-center space-x-2">
+          <i data-lucide="user-cog" class="w-5 h-5 text-emerald-600"></i>
+          <span>Manage Team Members</span>
+        </h3>
+        <button onclick="closePeopleModal()" class="text-slate-400 hover:text-slate-600">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div id="person-form-wrap" class="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-3">
+        <input type="hidden" id="person-id">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Name</label>
+            <input type="text" id="person-name" placeholder="e.g. Priya Nair" class="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-600" oninput="autofillAvatar()">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Role</label>
+            <input type="text" id="person-role" placeholder="e.g. Copywriter" class="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-600">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+        <div class="grid grid-cols-3 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Avatar Initials</label>
+            <input type="text" id="person-avatar" maxlength="3" placeholder="e.g. PN" oninput="markAvatarManual()" class="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-600 uppercase">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Capacity (h/day)</label>
+            <input type="number" id="person-capacity" min="1" max="24" value="8" class="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-600">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Color</label>
+            <input type="color" id="person-color" value="#0d9488" class="w-full h-[38px] bg-white border border-slate-300 rounded-lg p-1 cursor-pointer">
+          </div>
+        </div>
+        <div id="person-form-error" class="text-[11px] text-rose-600 hidden">Name is required.</div>
+        <div class="flex items-center justify-end space-x-2 pt-1">
+          <button type="button" id="person-cancel-btn" onclick="cancelPersonEdit()" class="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 hidden">Cancel</button>
+          <button type="button" onclick="savePerson()" class="px-4 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition shadow" id="person-save-btn">Add Team Member</button>
+        </div>
+      </div>
+
+      <div id="person-delete-confirm"></div>
+
+      <div class="space-y-2 pt-2 border-t border-slate-200" id="people-list"></div>
+    </div>
+  </div>
+
+  <!-- VACATION MODAL -->
+  <div id="vacation-modal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-white border border-slate-200 rounded-xl w-full max-w-md p-6 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-200 pb-3">
+        <h3 class="text-base font-bold text-slate-900 flex items-center space-x-2">
+          <i data-lucide="palmtree" class="w-5 h-5 text-indigo-600"></i>
+          <span>Schedule Team Vacation</span>
+        </h3>
+        <button onclick="closeVacationModal()" class="text-slate-400 hover:text-slate-600">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form onsubmit="saveVacation(event)" class="space-y-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Team Member</label>
+          <select id="vacation-member" required class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-indigo-600"></select>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Vacation Start</label>
+            <input type="date" id="vacation-start" required class="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-indigo-600">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Vacation End</label>
+            <input type="date" id="vacation-end" required class="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-indigo-600">
+          </div>
+        </div>
+
+        <button type="submit" class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-lg transition shadow">Book Vacation Block</button>
+      </form>
+
+      <div class="max-h-40 overflow-y-auto space-y-2 pt-2 border-t border-slate-200" id="vacation-list"></div>
+    </div>
+  </div>
+
+  <!-- HOLIDAY MODAL -->
+  <div id="holiday-modal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-white border border-slate-200 rounded-xl w-full max-w-md p-6 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-200 pb-3">
+        <h3 class="text-base font-bold text-slate-900">Manage Calendar & Off-Days</h3>
+        <button onclick="closeHolidayModal()" class="text-slate-400 hover:text-slate-600">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 flex items-center justify-between">
+        <div>
+          <span class="text-xs font-bold text-slate-800 block">Treat Weekends as Work Days</span>
+          <span class="text-[10px] text-slate-500">Enable if team works Saturdays & Sundays</span>
+        </div>
+        <input type="checkbox" id="toggle-work-weekends" onchange="toggleWeekendWork(this.checked)" class="w-4 h-4 text-emerald-600 rounded">
+      </div>
+
+      <form onsubmit="addHolidayForm(event)" class="space-y-2">
+        <span class="text-xs font-bold text-slate-700 block">Add Holiday or Off-Day Range</span>
+        <div class="space-y-2">
+          <input type="text" id="holiday-title" required placeholder="Title (e.g. Agency Off-Day)" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-emerald-600">
+          <div class="flex space-x-2">
+            <input type="date" id="holiday-start" required class="flex-1 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-emerald-600">
+            <input type="date" id="holiday-end" required class="flex-1 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-emerald-600">
+            <button type="submit" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold rounded-lg transition">Add</button>
+          </div>
+        </div>
+      </form>
+
+      <div class="max-h-40 overflow-y-auto space-y-2 pt-2 border-t border-slate-200" id="holiday-list"></div>
+    </div>
+  </div>
+
+  <!-- APPLICATION LOGIC -->
+  <script>
+    const DEFAULT_MEMBERS = [
+      { id: 'm1', name: 'Alex Rivera', role: 'UI/UX Designer', avatar: 'AR', capacity: 8, color: '#0d9488' },
+      { id: 'm2', name: 'Jordan Tech', role: 'Full-Stack Dev', avatar: 'JT', capacity: 8, color: '#4f46e5' }
+    ];
+    const PERSON_PALETTE = ['#0d9488', '#4f46e5', '#db2777', '#ea580c', '#65a30d', '#0891b2', '#7c3aed', '#dc2626', '#0369a1', '#a16207'];
+
+    function escapeHtml(str) {
+      return String(str ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    let state = {
+      viewMode: 'people', // 'people' | 'projects'
+      daysCount: 14,
+      colWidth: 0, // dynamically calculated for 14d
+      filterProjectStatus: 'ALL',
+      workWeekends: false,
+      startDate: new Date(),
+      members: DEFAULT_MEMBERS,
+      tasks: [],
+      holidays: [],
+      vacations: []
+    };
+
+    // Dragging & Interaction Tracker
+    let isSelecting = false;
+    let dragType = null; // 'task_create' | 'holiday_create' | 'task_move' | 'task_resize_left' | 'task_resize_right' | 'deadline_move'
+    let dragRowId = null;
+    let dragStartIndex = null;
+    let dragCurrentIndex = null;
+    let activeDraggingTaskId = null;
+    let activeDraggingDeadlineTaskId = null;
+
+    // --- INLINE EDITING (double-click any name/role/avatar/project title) ---
+    function startInlineEdit(el, kind, id, field) {
+      if (el.getAttribute('contenteditable') === 'true') return; // already editing
+      el.setAttribute('contenteditable', 'true');
+      el.classList.add('inline-editing');
+      el.focus();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+
+      const commit = () => {
+        el.removeAttribute('contenteditable');
+        el.classList.remove('inline-editing');
+        let val = el.textContent.trim();
+        const m = kind === 'member' ? state.members.find(x => x.id === id) : null;
+        if (!m) { renderTimeline(); return; }
+        if (field === 'name' && !val) { renderTimeline(); return; } // revert on blank name
+        if (field === 'avatar') val = (val.toUpperCase().slice(0, 3)) || initialsFrom(m.name) || '?';
+        m[field] = val;
+        saveState();
+        renderTimeline();
+        const peopleModal = document.getElementById('people-modal');
+        if (peopleModal && !peopleModal.classList.contains('hidden')) renderPeopleList();
+      };
+
+      const onKeydown = (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
+        if (e.key === 'Escape') { e.preventDefault(); el.removeEventListener('blur', onBlur); renderTimeline(); }
+      };
+      const onBlur = () => { el.removeEventListener('keydown', onKeydown); commit(); };
+      el.addEventListener('blur', onBlur, { once: true });
+      el.addEventListener('keydown', onKeydown);
+    }
+
+    // Project rows have no stable id — the project name IS the identity — so
+    // renaming cascades the new name across every task in that project.
+    function startInlineEditProjectName(el) {
+      if (el.getAttribute('contenteditable') === 'true') return;
+      const oldName = el.dataset.projectName;
+      el.setAttribute('contenteditable', 'true');
+      el.classList.add('inline-editing');
+      el.focus();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+
+      const commit = () => {
+        el.removeAttribute('contenteditable');
+        el.classList.remove('inline-editing');
+        const newName = el.textContent.trim();
+        if (!newName || newName === oldName) { renderTimeline(); return; }
+        state.tasks.forEach(t => { if (t.project === oldName) t.project = newName; });
+        saveState();
+        renderTimeline();
+      };
+      const onKeydown = (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
+        if (e.key === 'Escape') { e.preventDefault(); el.removeEventListener('blur', onBlur); renderTimeline(); }
+      };
+      const onBlur = () => { el.removeEventListener('keydown', onKeydown); commit(); };
+      el.addEventListener('blur', onBlur, { once: true });
+      el.addEventListener('keydown', onKeydown);
+    }
+
+    // --- UNDO TOAST ---
+    function showToast(msg, undoFn) {
+      const existing = document.getElementById('app-toast');
+      if (existing) existing.remove();
+      const t = document.createElement('div');
+      t.id = 'app-toast';
+      t.className = 'app-toast';
+      t.innerHTML = `<span>${escapeHtml(msg)}</span>` + (undoFn ? `<button class="toast-undo">Undo</button>` : '');
+      document.body.appendChild(t);
+      const timeout = setTimeout(() => t.remove(), 5000);
+      if (undoFn) {
+        t.querySelector('.toast-undo').onclick = () => { clearTimeout(timeout); t.remove(); undoFn(); };
+      }
+    }
+
+    function getMonday(d) {
+      d = new Date(d);
+      const day = d.getDay();
+      const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+      return new Date(d.setDate(diff));
+    }
+
+    function formatDate(d) {
+      return new Date(d).toISOString().split('T')[0];
+    }
+
+    function addDays(d, days) {
+      const res = new Date(d);
+      res.setDate(res.getDate() + days);
+      return res;
+    }
+
+    function getDaysBetween(startStr, endStr) {
+      const s = new Date(startStr);
+      const e = new Date(endStr);
+      return Math.round((e - s) / (1000 * 60 * 60 * 24)) + 1;
+    }
+
+    function initSeedData() {
+      const savedTasks = localStorage.getItem('resource_mgr_tasks_v4');
+      const savedHolidays = localStorage.getItem('resource_mgr_holidays_v4');
+      const savedVacations = localStorage.getItem('resource_mgr_vacations_v4');
+      const savedSettings = localStorage.getItem('resource_mgr_settings_v4');
+      const savedMembers = localStorage.getItem('resource_mgr_members_v4');
+
+      if (savedSettings) {
+        state.workWeekends = JSON.parse(savedSettings).workWeekends || false;
+      }
+
+      if (savedMembers) {
+        state.members = JSON.parse(savedMembers).map((m, i) => ({ capacity: 8, color: PERSON_PALETTE[i % PERSON_PALETTE.length], ...m }));
+      } else {
+        state.members = DEFAULT_MEMBERS;
+      }
+
+      if (savedTasks) {
+        state.tasks = JSON.parse(savedTasks);
+      } else {
+        const monday = getMonday(new Date());
+        state.tasks = [
+          {
+            id: 't1',
+            name: 'Kicking off the new brief',
+            project: 'BrandCo Campaign',
+            projectStatus: 'Active',
+            color: '#2563eb',
+            assigneeId: 'm1',
+            status: 'In Progress',
+            start: formatDate(monday),
+            end: formatDate(addDays(monday, 2)),
+            hours: 6,
+            hasDeadline: true,
+            deadlineType: 'CLIENT',
+            deadlineDate: formatDate(addDays(monday, 2))
+          },
+          {
+            id: 't2',
+            name: 'API Auth & Endpoint Setup',
+            project: 'SaaS App Build',
+            projectStatus: 'Active',
+            color: '#059669',
+            assigneeId: 'm2',
+            status: 'In Progress',
+            start: formatDate(addDays(monday, 1)),
+            end: formatDate(addDays(monday, 4)),
+            hours: 8,
+            hasDeadline: true,
+            deadlineType: 'INTERNAL',
+            deadlineDate: formatDate(addDays(monday, 3))
+          }
+        ];
+        saveState();
+      }
+
+      state.holidays = savedHolidays ? JSON.parse(savedHolidays) : [];
+      state.vacations = savedVacations ? JSON.parse(savedVacations) : [];
+      state.startDate = getMonday(new Date());
+    }
+
+    function saveState() {
+      localStorage.setItem('resource_mgr_tasks_v4', JSON.stringify(state.tasks));
+      localStorage.setItem('resource_mgr_holidays_v4', JSON.stringify(state.holidays));
+      localStorage.setItem('resource_mgr_vacations_v4', JSON.stringify(state.vacations));
+      localStorage.setItem('resource_mgr_settings_v4', JSON.stringify({ workWeekends: state.workWeekends }));
+      localStorage.setItem('resource_mgr_members_v4', JSON.stringify(state.members));
+    }
+
+    const MIN_COL_WIDTH = 56;
+
+    function calculateColumnWidth() {
+      const container = document.getElementById('timeline-container');
+      const containerWidth = container ? container.clientWidth : window.innerWidth;
+      const sidebarWidth = 240;
+      const availableWidth = containerWidth - sidebarWidth;
+      // Fit every zoom level to the screen; below the minimum, let the
+      // container scroll horizontally instead of squashing days unreadably thin.
+      state.colWidth = Math.max(MIN_COL_WIDTH, Math.floor(availableWidth / state.daysCount));
+    }
+
+    function setZoomLevel(days) {
+      state.daysCount = days;
+      [14, 21, 30, 45].forEach(d => {
+        const btn = document.getElementById(`zoom-${d}`);
+        if (btn) {
+          btn.className = (d === days)
+            ? "px-2.5 py-1 rounded bg-white text-slate-900 font-bold shadow-sm border border-slate-200"
+            : "px-2.5 py-1 rounded text-slate-600 hover:text-slate-900";
+        }
+      });
+      renderTimeline();
+    }
+
+    function filterProjectStatus(status) {
+      state.filterProjectStatus = status;
+      renderTimeline();
+    }
+
+    function renderTimeline() {
+      calculateColumnWidth();
+      const container = document.getElementById('timeline-grid');
+      const days = [];
+      const curr = new Date(state.startDate);
+      
+      for (let i = 0; i < state.daysCount; i++) {
+        days.push(new Date(curr));
+        curr.setDate(curr.getDate() + 1);
+      }
+
+      const sidebarWidth = 240;
+      const totalWidth = sidebarWidth + (days.length * state.colWidth);
+
+      let html = `<div style="width: ${totalWidth}px;" class="select-none bg-white min-h-screen">`;
+
+      // --- HEADER ROW ---
+      html += `<div class="flex border-b border-slate-200 bg-slate-50 sticky top-0 z-30 shadow-sm">`;
+      html += `<div style="width: ${sidebarWidth}px;" class="flex-none p-3 font-semibold text-xs text-slate-500 border-r border-slate-200 flex items-center justify-between bg-slate-50">`;
+      html += `<span>${state.viewMode === 'people' ? 'TEAM MEMBERS' : 'PROJECTS'}</span>`;
+      html += `<span class="text-[10px] font-medium text-slate-400">${state.members.length} members</span>`;
+      html += `</div>`;
+
+      days.forEach((day, index) => {
+        const dateStr = formatDate(day);
+        const isWeekend = (day.getDay() === 0 || day.getDay() === 6) && !state.workWeekends;
+        const holiday = state.holidays.find(h => dateStr >= h.start && dateStr <= h.end);
+        const isToday = formatDate(new Date()) === dateStr;
+
+        let bgClass = 'bg-slate-50';
+        if (holiday) bgClass = 'holiday-bg';
+        else if (isWeekend) bgClass = 'weekend-bg';
+
+        html += `
+          <div 
+            style="width: ${state.colWidth}px;" 
+            data-header-index="${index}"
+            onmousedown="onHeaderMouseDown(${index})"
+            onmouseenter="onHeaderMouseEnter(${index})"
+            class="flex-none p-2 text-center border-r border-slate-200 cursor-pointer ${bgClass} ${isToday ? 'bg-emerald-50/60 ring-1 ring-emerald-500/50' : ''}"
+          >
+            <div class="text-[10px] uppercase font-bold text-slate-500 pointer-events-none">${day.toLocaleDateString('en-US', { weekday: 'short' })}</div>
+            <div class="text-xs font-bold pointer-events-none ${isToday ? 'text-emerald-700' : 'text-slate-800'}">${day.getDate()} ${day.toLocaleDateString('en-US', { month: 'short' })}</div>
+          </div>
+        `;
+      });
+      html += `</div>`;
+
+      // Filtered Tasks
+      const activeTasks = state.tasks.filter(t => {
+        if (state.filterProjectStatus === 'ALL') return true;
+        return (t.projectStatus || 'Active') === state.filterProjectStatus;
+      });
+
+      // --- ROWS ---
+      if (state.viewMode === 'people') {
+        state.members.forEach(member => {
+          html += renderMemberRow(member, days, state.colWidth, sidebarWidth, activeTasks);
+        });
+      } else {
+        const projects = Array.from(new Set(activeTasks.map(t => t.project))).map(p => {
+          const task = activeTasks.find(t => t.project === p);
+          return { name: p, color: task ? task.color : '#2563eb', status: task ? (task.projectStatus || 'Active') : 'Active' };
+        });
+
+        if (projects.length === 0) {
+          html += `<div class="p-8 text-center text-slate-400 text-sm">No active project bookings.</div>`;
+        } else {
+          projects.forEach(project => {
+            html += renderProjectRow(project, days, state.colWidth, sidebarWidth, activeTasks);
+          });
+        }
+      }
+
+      html += `</div>`;
+      container.innerHTML = html;
+      lucide.createIcons();
+    }
+
+    // Render Member Row
+    function renderMemberRow(member, days, colWidth, sideWidth, filteredTasks) {
+      const memberTasks = filteredTasks.filter(t => t.assigneeId === member.id);
+      const capacity = member.capacity || 8;
+      const lanes = computeLanes(memberTasks);
+      const rowH = rowHeightForLanes(lanes.laneCount);
+
+      let rowHtml = `<div style="min-height:${rowH}px" class="flex border-b border-slate-200 relative bg-white hover:bg-slate-50/50 transition" data-row-type="people" data-member-id="${member.id}">`;
+
+      // Sidebar Cell
+      rowHtml += `
+        <div style="width: ${sideWidth}px;" class="flex-none p-3 border-r border-slate-200 bg-slate-50/80 flex flex-col justify-between sticky left-0 z-10">
+          <div class="flex items-center space-x-2.5">
+            <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white flex-none" style="background-color:${member.color || '#64748b'}" ondblclick="startInlineEdit(this, 'member', '${member.id}', 'avatar')" title="Double-click to edit initials">
+              ${escapeHtml(member.avatar)}
+            </div>
+            <div class="min-w-0">
+              <div class="text-xs font-bold text-slate-800 truncate" ondblclick="startInlineEdit(this, 'member', '${member.id}', 'name')" title="Double-click to rename">${escapeHtml(member.name)}</div>
+              <div class="text-[10px] text-slate-500 truncate" ondblclick="startInlineEdit(this, 'member', '${member.id}', 'role')" title="Double-click to edit role">${escapeHtml(member.role)}</div>
+            </div>
+          </div>
+          <div class="text-[10px] text-slate-500 flex items-center justify-between pt-2 border-t border-slate-200">
+            <span>Capacity Target:</span>
+            <span class="font-mono text-slate-700 font-semibold">${capacity}h/day</span>
+          </div>
+        </div>
+      `;
+
+      // Date Grid Cells with Gray Off-Day Styling
+      days.forEach((day, index) => {
+        const dateStr = formatDate(day);
+        const isWeekend = (day.getDay() === 0 || day.getDay() === 6) && !state.workWeekends;
+        const holiday = state.holidays.find(h => dateStr >= h.start && dateStr <= h.end);
+        const vacation = state.vacations.find(v => v.memberId === member.id && dateStr >= v.start && dateStr <= v.end);
+
+        const dailyHours = memberTasks.reduce((sum, t) => {
+          if (dateStr >= t.start && dateStr <= t.end) return sum + parseInt(t.hours || 0);
+          return sum;
+        }, 0);
+
+        let bgClass = '';
+        if (vacation) bgClass = 'vacation-bg';
+        else if (holiday) bgClass = 'holiday-bg';
+        else if (isWeekend) bgClass = 'weekend-bg';
+
+        const maxHours = vacation ? 0 : capacity;
+        const isOverbooked = dailyHours > maxHours && !vacation;
+
+        rowHtml += `
+          <div 
+            style="width: ${colWidth}px;" 
+            data-row-id="${member.id}" 
+            data-col-index="${index}"
+            onmousedown="onCellMouseDown('${member.id}', ${index})"
+            onmouseenter="onCellMouseEnter('${member.id}', ${index})"
+            class="flex-none border-r border-slate-200 p-1 flex flex-col justify-between relative cursor-pointer ${bgClass}"
+          >
+            <div class="flex justify-end pointer-events-none">
+              ${vacation ? `
+                <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 border border-indigo-300">Vacation</span>
+              ` : dailyHours > 0 ? `
+                <span class="text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm ${
+                  isOverbooked ? 'bg-rose-100 text-rose-700 border border-rose-300' : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                }">
+                  ${dailyHours}h ${isOverbooked ? `(+${dailyHours - maxHours}h)` : ''}
+                </span>
+              ` : ''}
+            </div>
+            ${holiday ? `<span class="text-[9px] font-bold text-rose-600 truncate px-1 pointer-events-none">${escapeHtml(holiday.title)}</span>` : ''}
+          </div>
+        `;
+      });
+
+      // Overlay Task Cards & Deadline Lines
+      rowHtml += `<div class="absolute top-8 left-[${sideWidth}px] right-0 bottom-1 pointer-events-none">`;
+      memberTasks.forEach(task => {
+        const lane = lanes.laneOf[task.id] || 0;
+        rowHtml += renderTaskBlock(task, days, colWidth, sideWidth, lane * LANE_HEIGHT);
+      });
+      rowHtml += `</div>`;
+
+      rowHtml += `</div>`;
+      return rowHtml;
+    }
+
+    // Render Project Row (Project View) — was previously called but never defined,
+    // which made switching to Project View crash the app.
+    function renderProjectRow(project, days, colWidth, sideWidth, filteredTasks) {
+      const projectTasks = filteredTasks.filter(t => t.project === project.name);
+      const lanes = computeLanes(projectTasks);
+      const rowH = rowHeightForLanes(lanes.laneCount);
+
+      const statusColors = {
+        'Active': 'bg-emerald-100 text-emerald-800 border-emerald-300',
+        'Follow Up': 'bg-amber-100 text-amber-800 border-amber-300',
+        'On Hold': 'bg-slate-200 text-slate-700 border-slate-300',
+        'Done': 'bg-indigo-100 text-indigo-800 border-indigo-300'
+      };
+      const statusClass = statusColors[project.status] || statusColors['Active'];
+
+      let rowHtml = `<div style="min-height:${rowH}px" class="flex border-b border-slate-200 relative bg-white hover:bg-slate-50/50 transition" data-row-type="projects" data-project-name="${escapeHtml(project.name)}">`;
+
+      // Sidebar Cell
+      rowHtml += `
+        <div style="width: ${sideWidth}px;" class="flex-none p-3 border-r border-slate-200 bg-slate-50/80 flex flex-col justify-between sticky left-0 z-10">
+          <div class="flex items-center space-x-2.5">
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center text-white flex-none" style="background-color:${project.color}">
+              <i data-lucide="folder-kanban" class="w-4 h-4"></i>
+            </div>
+            <div class="min-w-0">
+              <div class="text-xs font-bold text-slate-800 truncate" data-project-name="${escapeHtml(project.name)}" ondblclick="startInlineEditProjectName(this)" title="Double-click to rename">${escapeHtml(project.name)}</div>
+              <span class="text-[9px] font-semibold px-1.5 py-0.5 rounded border ${statusClass}">${escapeHtml(project.status)}</span>
+            </div>
+          </div>
+          <div class="text-[10px] text-slate-500 flex items-center justify-between pt-2 border-t border-slate-200">
+            <span>Bookings:</span>
+            <span class="font-mono text-slate-700 font-semibold">${projectTasks.length}</span>
+          </div>
+        </div>
+      `;
+
+      // Date Grid Cells
+      days.forEach((day, index) => {
+        const dateStr = formatDate(day);
+        const isWeekend = (day.getDay() === 0 || day.getDay() === 6) && !state.workWeekends;
+        const holiday = state.holidays.find(h => dateStr >= h.start && dateStr <= h.end);
+
+        const dailyHours = projectTasks.reduce((sum, t) => {
+          if (dateStr >= t.start && dateStr <= t.end) return sum + parseInt(t.hours || 0);
+          return sum;
+        }, 0);
+
+        let bgClass = '';
+        if (holiday) bgClass = 'holiday-bg';
+        else if (isWeekend) bgClass = 'weekend-bg';
+
+        rowHtml += `
+          <div 
+            style="width: ${colWidth}px;" 
+            class="flex-none border-r border-slate-200 p-1 flex flex-col justify-between relative ${bgClass}"
+          >
+            <div class="flex justify-end pointer-events-none">
+              ${dailyHours > 0 ? `
+                <span class="text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm bg-slate-100 text-slate-700 border border-slate-200">
+                  ${dailyHours}h total
+                </span>
+              ` : ''}
+            </div>
+            ${holiday ? `<span class="text-[9px] font-bold text-rose-600 truncate px-1 pointer-events-none">${escapeHtml(holiday.title)}</span>` : ''}
+          </div>
+        `;
+      });
+
+      // Overlay Task Cards & Deadline Lines
+      rowHtml += `<div class="absolute top-8 left-[${sideWidth}px] right-0 bottom-1 pointer-events-none">`;
+      projectTasks.forEach(task => {
+        const lane = lanes.laneOf[task.id] || 0;
+        rowHtml += renderTaskBlock(task, days, colWidth, sideWidth, lane * LANE_HEIGHT);
+      });
+      rowHtml += `</div>`;
+
+      rowHtml += `</div>`;
+      return rowHtml;
+    }
+
+    // Greedy interval-scheduling lane assignment so overlapping tasks in the same
+    // row stack vertically instead of rendering on top of each other.
+    function computeLanes(tasks) {
+      const sorted = [...tasks].sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
+      const laneEnds = [];
+      const laneOf = {};
+      sorted.forEach(t => {
+        let placed = false;
+        for (let i = 0; i < laneEnds.length; i++) {
+          if (t.start > laneEnds[i]) { laneOf[t.id] = i; laneEnds[i] = t.end; placed = true; break; }
+        }
+        if (!placed) { laneOf[t.id] = laneEnds.length; laneEnds.push(t.end); }
+      });
+      return { laneOf, laneCount: Math.max(1, laneEnds.length) };
+    }
+
+    const LANE_HEIGHT = 72; // 64px block + 8px gap
+    const OVERLAY_TOP = 32; // matches the "top-8" the overlay container sits at
+
+    function rowHeightForLanes(laneCount) {
+      return Math.max(110, OVERLAY_TOP + laneCount * LANE_HEIGHT + 14);
+    }
+
+    // NOTE: leftOffset/deadlineLeft are relative to the row-overlay <div>, which is
+    // already positioned at left:sideWidth. Do not add sideWidth again here — that
+    // was the cause of tasks rendering a full sidebar-width off from their real dates.
+    function renderTaskBlock(task, days, colWidth, sideWidth, laneTop) {
+      const gridStart = formatDate(days[0]);
+      const gridEnd = formatDate(days[days.length - 1]);
+
+      if (task.end < gridStart || task.start > gridEnd) return '';
+
+      const startIndex = days.findIndex(d => formatDate(d) >= task.start);
+      const actualStart = startIndex === -1 ? 0 : startIndex;
+      
+      const endIndex = days.findIndex(d => formatDate(d) > task.end);
+      const actualEnd = endIndex === -1 ? days.length : endIndex;
+
+      const durationDays = actualEnd - actualStart;
+      if (durationDays <= 0) return '';
+
+      const leftOffset = (actualStart * colWidth) + 4;
+      const blockWidth = (durationDays * colWidth) - 8;
+      const topOffset = (laneTop || 0) + 4;
+
+      const assignee = state.members.find(m => m.id === task.assigneeId);
+
+      // Deadline Flags (Client vs Internal)
+      let deadlineHtml = '';
+      if (task.hasDeadline && task.deadlineDate) {
+        const deadlineIdx = days.findIndex(d => formatDate(d) === task.deadlineDate);
+        if (deadlineIdx !== -1) {
+          const deadlineLeft = (deadlineIdx * colWidth) + (colWidth / 2);
+          const isClient = (task.deadlineType || 'CLIENT') === 'CLIENT';
+
+          deadlineHtml = `
+            <div 
+              style="left: ${deadlineLeft}px;" 
+              onmousedown="onDeadlineMouseDown(event, '${task.id}')"
+              class="${isClient ? 'deadline-marker-client' : 'deadline-marker-internal'} pointer-events-auto"
+              title="Drag to change ${isClient ? 'Client' : 'Internal'} deadline"
+            >
+              <div class="${isClient ? 'bg-rose-600' : 'bg-amber-500'} text-white p-0.5 rounded-full -ml-2 -mt-1 shadow flex items-center justify-center w-4 h-4">
+                <i data-lucide="${isClient ? 'flag' : 'diamond'}" class="w-2.5 h-2.5"></i>
+              </div>
+            </div>
+          `;
+        }
+      }
+
+      return `
+        ${deadlineHtml}
+        <div 
+          id="task-block-${task.id}"
+          onmousedown="onTaskMouseDown(event, '${task.id}')"
+          onclick="onTaskClick(event, '${task.id}')"
+          style="left: ${leftOffset}px; top: ${topOffset}px; width: ${blockWidth}px; border-left-color: ${task.color};" 
+          class="absolute h-16 pointer-events-auto bg-white hover:bg-slate-50 border-l-4 rounded-r-lg border-y border-r border-slate-300 p-2 shadow cursor-grab transition-shadow flex flex-col justify-between group z-10 hover:z-20"
+        >
+          <!-- Left Resize Handle -->
+          <div onmousedown="onResizeMouseDown(event, '${task.id}', 'left')" class="resize-handle-left hover:bg-emerald-500/30 rounded-l"></div>
+
+          <div class="flex items-center justify-between space-x-1 pointer-events-none">
+            <span class="text-xs font-bold text-slate-900 truncate">${escapeHtml(task.name)}</span>
+            <span class="text-[9px] font-semibold px-1 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200">${escapeHtml(task.status)}</span>
+          </div>
+
+          <div class="flex items-center justify-between text-[10px] text-slate-500 pt-1 pointer-events-none">
+            <span class="truncate font-medium text-slate-600">${state.viewMode === 'people' ? escapeHtml(task.project) : (assignee ? escapeHtml(assignee.name) : 'Unassigned')}</span>
+            <span class="font-mono text-emerald-700 font-bold">${task.hours}h/d</span>
+          </div>
+
+          <!-- Right Resize Handle -->
+          <div onmousedown="onResizeMouseDown(event, '${task.id}', 'right')" class="resize-handle-right hover:bg-emerald-500/30 rounded-r"></div>
+        </div>
+      `;
+    }
+
+    function onCellMouseDown(rowId, index) {
+      if (dragType) return;
+      isSelecting = true;
+      dragType = 'task_create';
+      dragRowId = rowId;
+      dragStartIndex = index;
+      dragCurrentIndex = index;
+      updateCellSelectionHighlights();
+    }
+
+    function onCellMouseEnter(rowId, index) {
+      if (isSelecting && dragType === 'task_create' && dragRowId === rowId) {
+        dragCurrentIndex = index;
+        updateCellSelectionHighlights();
+      }
+    }
+
+    function onHeaderMouseDown(index) {
+      if (dragType) return;
+      isSelecting = true;
+      dragType = 'holiday_create';
+      dragStartIndex = index;
+      dragCurrentIndex = index;
+      updateHeaderSelectionHighlights();
+    }
+
+    function onHeaderMouseEnter(index) {
+      if (isSelecting && dragType === 'holiday_create') {
+        dragCurrentIndex = index;
+        updateHeaderSelectionHighlights();
+      }
+    }
+
+    // The click event that fires after mouseup can't check `dragType` — the mouseup
+    // handler already clears it. Track actual pointer movement separately so a
+    // drag-to-reschedule doesn't also pop the edit modal open on release.
+    let taskDidMove = false;
+
+    function onTaskMouseDown(e, taskId) {
+      if (e.target.classList.contains('resize-handle-left') || e.target.classList.contains('resize-handle-right')) return;
+      e.stopPropagation();
+      dragType = 'task_move';
+      activeDraggingTaskId = taskId;
+      taskDidMove = false;
+      document.getElementById(`task-block-${taskId}`)?.classList.add('task-block-dragging');
+    }
+
+    function onResizeMouseDown(e, taskId, side) {
+      e.stopPropagation();
+      dragType = side === 'left' ? 'task_resize_left' : 'task_resize_right';
+      activeDraggingTaskId = taskId;
+      taskDidMove = false;
+    }
+
+    function onDeadlineMouseDown(e, taskId) {
+      e.stopPropagation();
+      dragType = 'deadline_move';
+      activeDraggingDeadlineTaskId = taskId;
+      taskDidMove = false;
+    }
+
+    function onTaskClick(e, taskId) {
+      if (!taskDidMove) openTaskModal(taskId);
+      taskDidMove = false;
+    }
+
+    // Global Mouse Movement Listener for Dragging Tasks & Deadlines
+    window.addEventListener('mousemove', (e) => {
+      if (!dragType) return;
+
+      const grid = document.getElementById('timeline-grid');
+      const rect = grid.getBoundingClientRect();
+      const relativeX = e.clientX - rect.left - 240; // 240px sidebar offset
+      const colIndex = Math.max(0, Math.min(state.daysCount - 1, Math.floor(relativeX / state.colWidth)));
+
+      const curr = new Date(state.startDate);
+      const hoveredDateStr = formatDate(addDays(curr, colIndex));
+
+      if (dragType === 'deadline_move' && activeDraggingDeadlineTaskId) {
+        const task = state.tasks.find(t => t.id === activeDraggingDeadlineTaskId);
+        if (task) {
+          if (task.deadlineDate !== hoveredDateStr) taskDidMove = true;
+          task.deadlineDate = hoveredDateStr;
+          renderTimeline();
+        }
+      } else if ((dragType === 'task_resize_left' || dragType === 'task_resize_right') && activeDraggingTaskId) {
+        const task = state.tasks.find(t => t.id === activeDraggingTaskId);
+        if (task) {
+          if (dragType === 'task_resize_left' && hoveredDateStr <= task.end) {
+            if (task.start !== hoveredDateStr) taskDidMove = true;
+            task.start = hoveredDateStr;
+          } else if (dragType === 'task_resize_right' && hoveredDateStr >= task.start) {
+            if (task.end !== hoveredDateStr) taskDidMove = true;
+            task.end = hoveredDateStr;
+          }
+          renderTimeline();
+        }
+      } else if (dragType === 'task_move' && activeDraggingTaskId) {
+        const task = state.tasks.find(t => t.id === activeDraggingTaskId);
+        if (task) {
+          const duration = getDaysBetween(task.start, task.end) - 1;
+          if (task.start !== hoveredDateStr) taskDidMove = true;
+          task.start = hoveredDateStr;
+          task.end = formatDate(addDays(new Date(hoveredDateStr), duration));
+
+          // Vertical re-assignment check
+          const elementHovered = document.elementFromPoint(e.clientX, e.clientY);
+          const rowElem = elementHovered?.closest('[data-row-type]');
+          if (rowElem) {
+            if (state.viewMode === 'people') {
+              const newMemberId = rowElem.getAttribute('data-member-id');
+              if (newMemberId) task.assigneeId = newMemberId;
+            } else {
+              const newProjName = rowElem.getAttribute('data-project-name');
+              if (newProjName) task.project = newProjName;
+            }
+          }
+          renderTimeline();
+        }
+      }
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (dragType === 'task_create' && dragRowId !== null) {
+        const startIdx = Math.min(dragStartIndex, dragCurrentIndex);
+        const endIdx = Math.max(dragStartIndex, dragCurrentIndex);
+
+        const curr = new Date(state.startDate);
+        const startDate = formatDate(addDays(curr, startIdx));
+        const endDate = formatDate(addDays(curr, endIdx));
+
+        openTaskModal(null, dragRowId, startDate, endDate);
+      } else if (dragType === 'holiday_create') {
+        const startIdx = Math.min(dragStartIndex, dragCurrentIndex);
+        const endIdx = Math.max(dragStartIndex, dragCurrentIndex);
+
+        const curr = new Date(state.startDate);
+        const startDate = formatDate(addDays(curr, startIdx));
+        const endDate = formatDate(addDays(curr, endIdx));
+
+        document.getElementById('holiday-start').value = startDate;
+        document.getElementById('holiday-end').value = endDate;
+        openHolidayModal();
+      }
+
+      if (['task_move', 'task_resize_left', 'task_resize_right', 'deadline_move'].includes(dragType)) {
+        saveState();
+      }
+
+      isSelecting = false;
+      dragType = null;
+      dragRowId = null;
+      activeDraggingTaskId = null;
+      activeDraggingDeadlineTaskId = null;
+      clearHighlights();
+    });
+
+    function updateCellSelectionHighlights() {
+      clearHighlights();
+      const min = Math.min(dragStartIndex, dragCurrentIndex);
+      const max = Math.max(dragStartIndex, dragCurrentIndex);
+
+      for (let i = min; i <= max; i++) {
+        const cell = document.querySelector(`[data-row-id="${dragRowId}"][data-col-index="${i}"]`);
+        if (cell) cell.classList.add('grid-cell-selecting');
+      }
+    }
+
+    function updateHeaderSelectionHighlights() {
+      clearHighlights();
+      const min = Math.min(dragStartIndex, dragCurrentIndex);
+      const max = Math.max(dragStartIndex, dragCurrentIndex);
+
+      for (let i = min; i <= max; i++) {
+        const cell = document.querySelector(`[data-header-index="${i}"]`);
+        if (cell) cell.classList.add('header-cell-selecting');
+      }
+    }
+
+    function clearHighlights() {
+      document.querySelectorAll('.grid-cell-selecting').forEach(e => e.classList.remove('grid-cell-selecting'));
+      document.querySelectorAll('.header-cell-selecting').forEach(e => e.classList.remove('header-cell-selecting'));
+    }
+
+    // --- CONTROLS & MODALS ---
+    function setViewMode(mode) {
+      state.viewMode = mode;
+      document.getElementById('btn-view-people').className = (mode === 'people') 
+        ? "px-3 py-1 rounded-md text-xs font-semibold transition-all flex items-center space-x-1.5 bg-white text-slate-800 shadow-sm border border-slate-200" 
+        : "px-3 py-1 rounded-md text-xs font-semibold transition-all flex items-center space-x-1.5 text-slate-600 hover:text-slate-900";
+
+      document.getElementById('btn-view-projects').className = (mode === 'projects') 
+        ? "px-3 py-1 rounded-md text-xs font-semibold transition-all flex items-center space-x-1.5 bg-white text-slate-800 shadow-sm border border-slate-200" 
+        : "px-3 py-1 rounded-md text-xs font-semibold transition-all flex items-center space-x-1.5 text-slate-600 hover:text-slate-900";
+
+      renderTimeline();
+    }
+
+    function shiftWindow(days) {
+      state.startDate = addDays(state.startDate, days);
+      renderTimeline();
+    }
+
+    function resetToToday() {
+      state.startDate = getMonday(new Date());
+      renderTimeline();
+    }
+
+    function toggleEstimationChecker() {
+      document.getElementById('estimation-checker-panel').classList.toggle('hidden');
+      calculateTimeRecommendation();
+    }
+
+    function calculateTimeRecommendation() {
+      const baseHours = parseFloat(document.getElementById('task-hours').value) || 4;
+      let multiplier = 1.0;
+
+      if (document.getElementById('check-client-reviews').checked) multiplier += 0.25;
+      if (document.getElementById('check-new-task').checked) multiplier += 0.30;
+      if (document.getElementById('check-interrup').checked) multiplier += 0.20;
+
+      const recommended = Math.round(baseHours * multiplier);
+      document.getElementById('rec-hours').innerText = `${recommended}h / day`;
+    }
+
+    function applyTimeRecommendation() {
+      const recValue = parseInt(document.getElementById('rec-hours').innerText);
+      if (recValue) document.getElementById('task-hours').value = recValue;
+      document.getElementById('estimation-checker-panel').classList.add('hidden');
+    }
+
+    function toggleDeadlineInput(checked) {
+      const wrapper = document.getElementById('deadline-date-wrapper');
+      if (checked) {
+        wrapper.classList.remove('hidden');
+        if (!document.getElementById('task-deadline-date').value) {
+          document.getElementById('task-deadline-date').value = document.getElementById('task-end').value;
+        }
+      } else {
+        wrapper.classList.add('hidden');
+      }
+    }
+
+    function openTaskModal(taskId = null, prefillRowId = null, prefillStart = null, prefillEnd = null) {
+      const modal = document.getElementById('task-modal');
+      const deleteBtn = document.getElementById('btn-delete-task');
+      const assigneeSelect = document.getElementById('task-assignee');
+
+      document.getElementById('estimation-checker-panel').classList.add('hidden');
+      assigneeSelect.innerHTML = state.members.map(m => `<option value="${m.id}">${escapeHtml(m.name)} (${escapeHtml(m.role)})</option>`).join('');
+      const projectNames = Array.from(new Set(state.tasks.map(t => t.project).filter(Boolean)));
+      document.getElementById('project-names-list').innerHTML = projectNames.map(n => `<option value="${escapeHtml(n)}"></option>`).join('');
+
+      if (taskId) {
+        const task = state.tasks.find(t => t.id === taskId);
+        if (!task) return;
+
+        document.getElementById('modal-title').innerText = "Edit Task Booking";
+        document.getElementById('task-id').value = task.id;
+        document.getElementById('task-name').value = task.name;
+        document.getElementById('task-project').value = task.project;
+        document.getElementById('task-project-status').value = task.projectStatus || 'Active';
+        document.getElementById('task-color').value = task.color || '#2563eb';
+        document.getElementById('task-assignee').value = task.assigneeId;
+        document.getElementById('task-start').value = task.start;
+        document.getElementById('task-end').value = task.end;
+        document.getElementById('task-hours').value = task.hours;
+
+        const hasDeadline = task.hasDeadline || false;
+        document.getElementById('task-has-deadline').checked = hasDeadline;
+        toggleDeadlineInput(hasDeadline);
+        document.getElementById('task-deadline-type').value = task.deadlineType || 'CLIENT';
+        document.getElementById('task-deadline-date').value = task.deadlineDate || task.end;
+
+        deleteBtn.classList.remove('hidden');
+      } else {
+        document.getElementById('modal-title').innerText = "New Task Booking";
+        document.getElementById('task-form').reset();
+        document.getElementById('task-id').value = '';
+
+        const todayStr = formatDate(new Date());
+        document.getElementById('task-start').value = prefillStart || todayStr;
+        document.getElementById('task-end').value = prefillEnd || todayStr;
+
+        if (prefillRowId) {
+          const member = state.members.find(m => m.id === prefillRowId);
+          if (member) document.getElementById('task-assignee').value = member.id;
+          else document.getElementById('task-project').value = prefillRowId;
+        }
+
+        document.getElementById('task-has-deadline').checked = false;
+        toggleDeadlineInput(false);
+
+        deleteBtn.classList.add('hidden');
+      }
+
+      modal.classList.remove('hidden');
+    }
+
+    function closeTaskModal() {
+      document.getElementById('task-modal').classList.add('hidden');
+    }
+
+    function saveTask(event) {
+      event.preventDefault();
+      const id = document.getElementById('task-id').value;
+      const hasDeadline = document.getElementById('task-has-deadline').checked;
+      
+      const taskData = {
+        id: id || 't_' + Date.now(),
+        name: document.getElementById('task-name').value,
+        project: document.getElementById('task-project').value,
+        projectStatus: document.getElementById('task-project-status').value,
+        color: document.getElementById('task-color').value,
+        assigneeId: document.getElementById('task-assignee').value,
+        status: 'In Progress',
+        start: document.getElementById('task-start').value,
+        end: document.getElementById('task-end').value,
+        hours: parseInt(document.getElementById('task-hours').value),
+        hasDeadline: hasDeadline,
+        deadlineType: document.getElementById('task-deadline-type').value,
+        deadlineDate: hasDeadline ? document.getElementById('task-deadline-date').value : null
+      };
+
+      if (id) {
+        const index = state.tasks.findIndex(t => t.id === id);
+        if (index !== -1) state.tasks[index] = taskData;
+      } else {
+        state.tasks.push(taskData);
+      }
+
+      saveState();
+      closeTaskModal();
+      renderTimeline();
+    }
+
+    function deleteTask() {
+      const id = document.getElementById('task-id').value;
+      if (!id) return;
+      const idx = state.tasks.findIndex(t => t.id === id);
+      if (idx === -1) return;
+      const removed = state.tasks[idx];
+
+      state.tasks.splice(idx, 1);
+      saveState();
+      closeTaskModal();
+      renderTimeline();
+      showToast('Task deleted', () => {
+        state.tasks.splice(idx, 0, removed);
+        saveState();
+        renderTimeline();
+      });
+    }
+
+    // --- PEOPLE MANAGEMENT ---
+    let confirmDeletePersonId = null;
+
+    function openPeopleModal() {
+      confirmDeletePersonId = null;
+      resetPersonForm();
+      renderPeopleList();
+      document.getElementById('person-delete-confirm').innerHTML = '';
+      document.getElementById('people-modal').classList.remove('hidden');
+      lucide.createIcons();
+    }
+
+    function closePeopleModal() {
+      document.getElementById('people-modal').classList.add('hidden');
+      confirmDeletePersonId = null;
+    }
+
+    function resetPersonForm() {
+      document.getElementById('person-id').value = '';
+      document.getElementById('person-name').value = '';
+      document.getElementById('person-role').value = '';
+      const avatarEl = document.getElementById('person-avatar');
+      avatarEl.value = '';
+      avatarEl.dataset.autofilled = 'true';
+      document.getElementById('person-capacity').value = 8;
+      document.getElementById('person-color').value = PERSON_PALETTE[state.members.length % PERSON_PALETTE.length];
+      document.getElementById('person-save-btn').innerText = 'Add Team Member';
+      document.getElementById('person-cancel-btn').classList.add('hidden');
+      document.getElementById('person-form-error').classList.add('hidden');
+    }
+
+    function initialsFrom(name) {
+      return name.trim().split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0]).join('').toUpperCase();
+    }
+
+    function autofillAvatar() {
+      const nameEl = document.getElementById('person-name');
+      const avatarEl = document.getElementById('person-avatar');
+      if (avatarEl.dataset.autofilled !== 'false') {
+        avatarEl.value = initialsFrom(nameEl.value);
+        avatarEl.dataset.autofilled = 'true';
+      }
+    }
+
+    function markAvatarManual() {
+      document.getElementById('person-avatar').dataset.autofilled = 'false';
+    }
+
+    function openMemberEditor(id) {
+      const m = state.members.find(x => x.id === id);
+      if (!m) return;
+      confirmDeletePersonId = null;
+      document.getElementById('person-delete-confirm').innerHTML = '';
+      document.getElementById('person-id').value = m.id;
+      document.getElementById('person-name').value = m.name;
+      document.getElementById('person-role').value = m.role;
+      const avatarEl = document.getElementById('person-avatar');
+      avatarEl.value = m.avatar;
+      avatarEl.dataset.autofilled = 'false';
+      document.getElementById('person-capacity').value = m.capacity || 8;
+      document.getElementById('person-color').value = m.color || '#0d9488';
+      document.getElementById('person-save-btn').innerText = 'Save Changes';
+      document.getElementById('person-cancel-btn').classList.remove('hidden');
+      document.getElementById('person-form-error').classList.add('hidden');
+    }
+
+    function cancelPersonEdit() {
+      resetPersonForm();
+    }
+
+    function savePerson() {
+      const id = document.getElementById('person-id').value;
+      const name = document.getElementById('person-name').value.trim();
+      const role = document.getElementById('person-role').value.trim();
+      let avatar = document.getElementById('person-avatar').value.trim().toUpperCase();
+      const capacity = parseInt(document.getElementById('person-capacity').value) || 8;
+      const color = document.getElementById('person-color').value || '#0d9488';
+
+      if (!name) {
+        document.getElementById('person-form-error').classList.remove('hidden');
+        document.getElementById('person-name').focus();
+        return;
+      }
+      if (!avatar) avatar = initialsFrom(name) || '?';
+
+      if (id) {
+        const m = state.members.find(x => x.id === id);
+        if (m) { m.name = name; m.role = role; m.avatar = avatar; m.capacity = capacity; m.color = color; }
+      } else {
+        state.members.push({ id: 'm_' + Date.now(), name, role, avatar, capacity, color });
+      }
+      saveState();
+      resetPersonForm();
+      renderPeopleList();
+      renderTimeline();
+    }
+
+    function requestDeletePerson(id) {
+      confirmDeletePersonId = id;
+      renderPeopleDeleteConfirm();
+    }
+
+    function cancelDeletePerson() {
+      confirmDeletePersonId = null;
+      document.getElementById('person-delete-confirm').innerHTML = '';
+    }
+
+    function renderPeopleDeleteConfirm() {
+      const box = document.getElementById('person-delete-confirm');
+      const m = state.members.find(x => x.id === confirmDeletePersonId);
+      if (!m) { confirmDeletePersonId = null; box.innerHTML = ''; return; }
+
+      const taskCount = state.tasks.filter(t => t.assigneeId === m.id).length;
+      const others = state.members.filter(x => x.id !== m.id);
+
+      if (taskCount === 0) {
+        box.innerHTML = `
+          <div class="bg-rose-50 border border-rose-200 rounded-lg p-3 text-xs text-rose-800 space-y-2">
+            <div>Remove <b>${escapeHtml(m.name)}</b>? They have no tasks assigned.</div>
+            <div class="flex justify-end space-x-2">
+              <button onclick="cancelDeletePerson()" class="px-2.5 py-1 text-slate-600 hover:text-slate-900 font-medium">Cancel</button>
+              <button onclick="confirmDeletePerson()" class="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white font-semibold rounded">Remove</button>
+            </div>
+          </div>`;
+      } else if (others.length === 0) {
+        box.innerHTML = `
+          <div class="bg-rose-50 border border-rose-200 rounded-lg p-3 text-xs text-rose-800 space-y-2">
+            <div><b>${escapeHtml(m.name)}</b> has ${taskCount} task${taskCount === 1 ? '' : 's'} booked and is the only team member. Add someone else first, or delete/reassign their tasks manually.</div>
+            <div class="flex justify-end"><button onclick="cancelDeletePerson()" class="px-2.5 py-1 text-slate-600 hover:text-slate-900 font-medium">Close</button></div>
+          </div>`;
+      } else {
+        box.innerHTML = `
+          <div class="bg-rose-50 border border-rose-200 rounded-lg p-3 text-xs text-rose-800 space-y-2">
+            <div><b>${escapeHtml(m.name)}</b> has ${taskCount} task${taskCount === 1 ? '' : 's'} booked. Reassign them to continue:</div>
+            <select id="reassign-target" class="w-full bg-white border border-rose-300 rounded px-2 py-1.5 text-xs text-slate-800">
+              ${others.map(o => `<option value="${o.id}">${escapeHtml(o.name)}</option>`).join('')}
+            </select>
+            <div class="flex justify-end space-x-2">
+              <button onclick="cancelDeletePerson()" class="px-2.5 py-1 text-slate-600 hover:text-slate-900 font-medium">Cancel</button>
+              <button onclick="confirmDeletePerson()" class="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white font-semibold rounded">Reassign &amp; Remove</button>
+            </div>
+          </div>`;
+      }
+    }
+
+    function confirmDeletePerson() {
+      const m = state.members.find(x => x.id === confirmDeletePersonId);
+      if (!m) return;
+      const reassignSel = document.getElementById('reassign-target');
+      if (reassignSel) {
+        const targetId = reassignSel.value;
+        state.tasks.forEach(t => { if (t.assigneeId === m.id) t.assigneeId = targetId; });
+      }
+      state.members = state.members.filter(x => x.id !== m.id);
+      if (document.getElementById('person-id').value === m.id) resetPersonForm();
+      confirmDeletePersonId = null;
+      saveState();
+      document.getElementById('person-delete-confirm').innerHTML = '';
+      renderPeopleList();
+      renderTimeline();
+    }
+
+    function renderPeopleList() {
+      const box = document.getElementById('people-list');
+      if (!state.members.length) {
+        box.innerHTML = `<div class="text-xs text-slate-400 text-center py-2">No team members yet — add one above.</div>`;
+        return;
+      }
+      box.innerHTML = state.members.map(m => {
+        const taskCount = state.tasks.filter(t => t.assigneeId === m.id).length;
+        return `
+          <div class="flex items-center justify-between bg-slate-50 p-2.5 rounded border border-slate-200">
+            <div class="flex items-center space-x-2.5 min-w-0">
+              <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white flex-none" style="background-color:${m.color || '#64748b'}">${escapeHtml(m.avatar)}</div>
+              <div class="min-w-0">
+                <div class="text-xs font-bold text-slate-800 truncate">${escapeHtml(m.name)}</div>
+                <div class="text-[10px] text-slate-500 truncate">${escapeHtml(m.role)} · ${m.capacity || 8}h/day · ${taskCount} task${taskCount === 1 ? '' : 's'}</div>
+              </div>
+            </div>
+            <div class="flex items-center space-x-1 flex-none">
+              <button onclick="openMemberEditor('${m.id}')" class="p-1.5 text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 rounded" title="Edit">
+                <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
+              </button>
+              <button onclick="requestDeletePerson('${m.id}')" class="p-1.5 text-slate-500 hover:text-rose-700 hover:bg-rose-50 rounded" title="Remove">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+      lucide.createIcons();
+    }
+
+    function openVacationModal() {
+      const select = document.getElementById('vacation-member');
+      select.innerHTML = state.members.map(m => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('');
+      document.getElementById('vacation-start').value = formatDate(new Date());
+      document.getElementById('vacation-end').value = formatDate(addDays(new Date(), 5));
+      renderVacationList();
+      document.getElementById('vacation-modal').classList.remove('hidden');
+    }
+
+    function closeVacationModal() {
+      document.getElementById('vacation-modal').classList.add('hidden');
+    }
+
+    function saveVacation(event) {
+      event.preventDefault();
+      const memberId = document.getElementById('vacation-member').value;
+      const start = document.getElementById('vacation-start').value;
+      const end = document.getElementById('vacation-end').value;
+
+      state.vacations.push({ id: 'v_' + Date.now(), memberId, start, end });
+      saveState();
+      renderVacationList();
+      renderTimeline();
+    }
+
+    function renderVacationList() {
+      const container = document.getElementById('vacation-list');
+      if (state.vacations.length === 0) {
+        container.innerHTML = `<div class="text-xs text-slate-400 text-center py-2">No upcoming vacations booked.</div>`;
+        return;
+      }
+
+      container.innerHTML = state.vacations.map((v, i) => {
+        const member = state.members.find(m => m.id === v.memberId);
+        return `
+          <div class="flex items-center justify-between bg-slate-50 p-2 rounded border border-slate-200 text-xs">
+            <div>
+              <span class="font-bold text-slate-800">${member ? escapeHtml(member.name) : 'Team Member'}</span>
+              <span class="text-indigo-600 ml-2 font-mono text-[10px]">${v.start} to ${v.end}</span>
+            </div>
+            <button onclick="removeVacation(${i})" class="text-rose-600 hover:text-rose-800">
+              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+        `;
+      }).join('');
+      lucide.createIcons();
+    }
+
+    function removeVacation(index) {
+      const removed = state.vacations[index];
+      state.vacations.splice(index, 1);
+      saveState();
+      renderVacationList();
+      renderTimeline();
+      showToast('Vacation removed', () => {
+        state.vacations.splice(index, 0, removed);
+        saveState();
+        renderVacationList();
+        renderTimeline();
+      });
+    }
+
+    function openHolidayModal() {
+      document.getElementById('toggle-work-weekends').checked = state.workWeekends;
+      if (!document.getElementById('holiday-start').value) {
+        document.getElementById('holiday-start').value = formatDate(new Date());
+        document.getElementById('holiday-end').value = formatDate(new Date());
+      }
+      renderHolidayList();
+      document.getElementById('holiday-modal').classList.remove('hidden');
+    }
+
+    function closeHolidayModal() {
+      document.getElementById('holiday-modal').classList.add('hidden');
+    }
+
+    function toggleWeekendWork(value) {
+      state.workWeekends = value;
+      saveState();
+      renderTimeline();
+    }
+
+    function renderHolidayList() {
+      const container = document.getElementById('holiday-list');
+      if (state.holidays.length === 0) {
+        container.innerHTML = `<div class="text-xs text-slate-400 text-center py-2">No custom off-days set.</div>`;
+        return;
+      }
+
+      container.innerHTML = state.holidays.map((h, i) => `
+        <div class="flex items-center justify-between bg-slate-50 p-2 rounded border border-slate-200 text-xs">
+          <div>
+            <span class="font-bold text-slate-800">${escapeHtml(h.title)}</span>
+            <span class="text-slate-500 ml-2 font-mono text-[10px]">${h.start} to ${h.end}</span>
+          </div>
+          <button onclick="removeHoliday(${i})" class="text-rose-600 hover:text-rose-800">
+            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
+      `).join('');
+      lucide.createIcons();
+    }
+
+    function addHolidayForm(event) {
+      event.preventDefault();
+      const title = document.getElementById('holiday-title').value;
+      const start = document.getElementById('holiday-start').value;
+      const end = document.getElementById('holiday-end').value;
+
+      state.holidays.push({ title, start, end });
+      saveState();
+      renderHolidayList();
+      renderTimeline();
+
+      document.getElementById('holiday-title').value = '';
+    }
+
+    function removeHoliday(index) {
+      const removed = state.holidays[index];
+      state.holidays.splice(index, 1);
+      saveState();
+      renderHolidayList();
+      renderTimeline();
+      showToast('Holiday removed', () => {
+        state.holidays.splice(index, 0, removed);
+        saveState();
+        renderHolidayList();
+        renderTimeline();
+      });
+    }
+
+    window.addEventListener('resize', () => {
+      renderTimeline();
+    });
+
+    window.onload = function() {
+      initSeedData();
+      renderTimeline();
+    };
+  </script>
+</body>
+</html>
