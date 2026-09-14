@@ -524,17 +524,32 @@
       members: DEFAULT_MEMBERS,
       tasks: [],
       holidays: [],
-      vacations: []
+      vacations: [],
+      // Single-pin: at most one member/project floats to the top at a time.
+      pinnedMemberId: null,
+      pinnedProjectName: null,
+      // Persisted display order. Members reorder in place (state.members IS the
+      // order); projects have no real entity, so their order lives here, keyed
+      // by project name. Projects not yet seen here just append at render time.
+      projectOrder: [],
+      // Project rows are normally derived from tasks and vanish once task-less.
+      // A name added here via the "+ Add project" row survives with zero
+      // bookings until a task gives it one (harmless overlap, deduped at render).
+      emptyProjects: [],
+      addingRow: null // 'people' | 'projects' while the "+" ghost row is showing its input
     };
 
     // Dragging & Interaction Tracker
     let isSelecting = false;
-    let dragType = null; // 'task_create' | 'holiday_create' | 'task_move' | 'task_resize_left' | 'task_resize_right' | 'deadline_move'
+    let dragType = null; // 'task_create' | 'holiday_create' | 'task_move' | 'task_resize_left' | 'task_resize_right' | 'deadline_move' | 'row_reorder'
     let dragRowId = null;
     let dragStartIndex = null;
     let dragCurrentIndex = null;
     let activeDraggingTaskId = null;
     let activeDraggingDeadlineTaskId = null;
+    let headerDidDrag = false; // distinguishes a header click (quick day-off toggle) from a drag (range modal)
+    let reorderView = null; // 'people' | 'projects', while dragType === 'row_reorder'
+    let reorderId = null; // member id or project name being dragged
 
     // --- INLINE EDITING (double-click any name/role/avatar/project title) ---
     function startInlineEdit(el, kind, id, field) {
@@ -650,7 +665,12 @@
       const savedMembers = localStorage.getItem('resource_mgr_members_v4');
 
       if (savedSettings) {
-        state.workWeekends = JSON.parse(savedSettings).workWeekends || false;
+        const s = JSON.parse(savedSettings);
+        state.workWeekends = s.workWeekends || false;
+        state.pinnedMemberId = s.pinnedMemberId || null;
+        state.pinnedProjectName = s.pinnedProjectName || null;
+        state.projectOrder = s.projectOrder || [];
+        state.emptyProjects = s.emptyProjects || [];
       }
 
       if (savedMembers) {
@@ -707,7 +727,13 @@
       localStorage.setItem('resource_mgr_tasks_v4', JSON.stringify(state.tasks));
       localStorage.setItem('resource_mgr_holidays_v4', JSON.stringify(state.holidays));
       localStorage.setItem('resource_mgr_vacations_v4', JSON.stringify(state.vacations));
-      localStorage.setItem('resource_mgr_settings_v4', JSON.stringify({ workWeekends: state.workWeekends }));
+      localStorage.setItem('resource_mgr_settings_v4', JSON.stringify({
+        workWeekends: state.workWeekends,
+        pinnedMemberId: state.pinnedMemberId,
+        pinnedProjectName: state.pinnedProjectName,
+        projectOrder: state.projectOrder,
+        emptyProjects: state.emptyProjects
+      }));
       localStorage.setItem('resource_mgr_members_v4', JSON.stringify(state.members));
     }
 
@@ -797,27 +823,176 @@
 
       // --- ROWS ---
       if (state.viewMode === 'people') {
-        state.members.forEach(member => {
+        getOrderedMembers().forEach(member => {
           html += renderMemberRow(member, days, state.colWidth, sidebarWidth, activeTasks);
         });
+        html += renderAddRow('people', sidebarWidth);
       } else {
-        const projects = Array.from(new Set(activeTasks.map(t => t.project))).map(p => {
+        const derivedNames = new Set(activeTasks.map(t => t.project));
+        const projects = Array.from(derivedNames).map(p => {
           const task = activeTasks.find(t => t.project === p);
           return { name: p, color: task ? task.color : '#2563eb', status: task ? (task.projectStatus || 'Active') : 'Active' };
+        });
+        // Task-less projects created via "+ Add project" — dropped once a real
+        // task gives them a name already in derivedNames, to avoid duplicates.
+        state.emptyProjects.filter(name => !derivedNames.has(name)).forEach(name => {
+          projects.push({ name, color: '#64748b', status: 'Active' });
         });
 
         if (projects.length === 0) {
           html += `<div class="p-8 text-center text-slate-400 text-sm">No active project bookings.</div>`;
         } else {
-          projects.forEach(project => {
+          getOrderedProjects(projects).forEach(project => {
             html += renderProjectRow(project, days, state.colWidth, sidebarWidth, activeTasks);
           });
         }
+        html += renderAddRow('projects', sidebarWidth);
       }
 
       html += `</div>`;
       container.innerHTML = html;
       lucide.createIcons();
+    }
+
+    // --- ROW ORDER / PIN ---
+    function getOrderedMembers() {
+      const pinned = state.members.find(m => m.id === state.pinnedMemberId);
+      const rest = state.members.filter(m => m.id !== state.pinnedMemberId);
+      return pinned ? [pinned, ...rest] : rest;
+    }
+
+    // `projects` here is already deduped by name. Any name not yet in
+    // state.projectOrder (new project, or before the first drag ever happens)
+    // is appended at the end, in first-seen order, without mutating state.
+    function getOrderedProjects(projects) {
+      const known = new Set(state.projectOrder);
+      const remembered = state.projectOrder.filter(name => projects.some(p => p.name === name));
+      const newOnes = projects.filter(p => !known.has(p.name)).map(p => p.name);
+      const byName = new Map(projects.map(p => [p.name, p]));
+      let ordered = [...remembered, ...newOnes].map(name => byName.get(name)).filter(Boolean);
+      if (state.pinnedProjectName && byName.has(state.pinnedProjectName)) {
+        ordered = [byName.get(state.pinnedProjectName), ...ordered.filter(p => p.name !== state.pinnedProjectName)];
+      }
+      return ordered;
+    }
+
+    function moveInArray(arr, keyFn, fromKey, toKey) {
+      const fromIdx = arr.findIndex(x => keyFn(x) === fromKey);
+      if (fromIdx === -1) return;
+      const [moved] = arr.splice(fromIdx, 1);
+      const toIdx = arr.findIndex(x => keyFn(x) === toKey);
+      arr.splice(toIdx === -1 ? arr.length : toIdx, 0, moved);
+    }
+
+    function togglePinMember(id) {
+      state.pinnedMemberId = state.pinnedMemberId === id ? null : id;
+      saveState();
+      renderTimeline();
+    }
+
+    function togglePinProject(name) {
+      state.pinnedProjectName = state.pinnedProjectName === name ? null : name;
+      saveState();
+      renderTimeline();
+    }
+
+    function deleteEmptyProject(name) {
+      state.emptyProjects = state.emptyProjects.filter(n => n !== name);
+      state.projectOrder = state.projectOrder.filter(n => n !== name);
+      if (state.pinnedProjectName === name) state.pinnedProjectName = null;
+      saveState();
+      renderTimeline();
+    }
+
+    // Drag handle mousedown — the actual move happens in the shared mousemove
+    // listener below (dragType === 'row_reorder'), same pattern as task dragging.
+    function onRowHandleMouseDown(e, view, id) {
+      e.stopPropagation();
+      e.preventDefault();
+      if (dragType) return;
+      dragType = 'row_reorder';
+      reorderView = view;
+      reorderId = id;
+      if (view === 'projects') {
+        // Snapshot the current on-screen order (already pin-adjusted) as the
+        // base to reorder from, so untouched projects keep a stable position.
+        state.projectOrder = Array.from(document.querySelectorAll('[data-row-type="projects"]'))
+          .map(el => el.getAttribute('data-project-name'));
+      }
+    }
+
+    // --- ADD-ROW ("+" GHOST ROW) ---
+    function renderAddRow(view, sideWidth) {
+      if (state.addingRow === view) {
+        return `
+          <div class="flex border-b border-slate-200 bg-white">
+            <div style="width:${sideWidth}px;" class="flex-none p-3 border-r border-slate-200 bg-slate-50/80">
+              <input
+                id="add-row-input"
+                type="text"
+                placeholder="${view === 'people' ? 'Name, then Enter' : 'Project name, then Enter'}"
+                class="w-full bg-white border border-emerald-400 rounded px-2 py-1.5 text-xs text-slate-800 focus:outline-none"
+                onkeydown="onAddRowKeydown(event)"
+                onblur="onAddRowBlur('${view}')"
+              />
+            </div>
+            <div class="flex-1"></div>
+          </div>
+        `;
+      }
+      return `
+        <div class="flex border-b border-slate-200 bg-white hover:bg-slate-50 transition cursor-pointer" onclick="startAddRow('${view}')">
+          <div style="width:${sideWidth}px;" class="flex-none p-3 border-r border-slate-200 flex items-center gap-2 text-slate-400 hover:text-slate-600">
+            <i data-lucide="plus" class="w-3.5 h-3.5 pointer-events-none"></i>
+            <span class="text-xs font-medium pointer-events-none">${view === 'people' ? 'Add person' : 'Add project'}</span>
+          </div>
+          <div class="flex-1"></div>
+        </div>
+      `;
+    }
+
+    function startAddRow(view) {
+      state.addingRow = view;
+      renderTimeline();
+      document.getElementById('add-row-input')?.focus();
+    }
+
+    function onAddRowKeydown(e) {
+      if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); }
+      if (e.key === 'Escape') { e.preventDefault(); e.target.dataset.cancelled = 'true'; e.target.blur(); }
+    }
+
+    function onAddRowBlur(view) {
+      const input = document.getElementById('add-row-input');
+      const cancelled = input?.dataset.cancelled === 'true';
+      const name = input ? input.value.trim() : '';
+      state.addingRow = null;
+      if (!cancelled && name) {
+        if (view === 'people') quickAddMember(name);
+        else quickAddProject(name);
+      } else {
+        renderTimeline();
+      }
+    }
+
+    function quickAddMember(name) {
+      state.members.push({
+        id: 'm_' + Date.now(),
+        name,
+        role: '',
+        avatar: initialsFrom(name) || '?',
+        capacity: 8,
+        color: PERSON_PALETTE[state.members.length % PERSON_PALETTE.length]
+      });
+      saveState();
+      renderTimeline();
+    }
+
+    function quickAddProject(name) {
+      const exists = state.tasks.some(t => t.project === name) || state.emptyProjects.includes(name);
+      if (!exists) state.emptyProjects.push(name);
+      saveState();
+      renderTimeline();
     }
 
     // Render Member Row
@@ -830,9 +1005,18 @@
       let rowHtml = `<div style="min-height:${rowH}px" class="flex border-b border-slate-200 relative bg-white hover:bg-slate-50/50 transition" data-row-type="people" data-member-id="${member.id}">`;
 
       // Sidebar Cell
+      const memberPinned = member.id === state.pinnedMemberId;
       rowHtml += `
-        <div style="width: ${sideWidth}px;" class="flex-none p-3 border-r border-slate-200 bg-slate-50/80 flex flex-col justify-between sticky left-0 z-10">
-          <div class="flex items-center space-x-2.5">
+        <div style="width: ${sideWidth}px;" class="flex-none p-3 border-r border-slate-200 bg-slate-50/80 flex flex-col justify-between sticky left-0 z-10 relative group">
+          <button
+            class="absolute top-1 right-1 p-1 rounded hover:bg-slate-200 ${memberPinned ? 'text-amber-500' : 'text-slate-300 opacity-0 group-hover:opacity-100'}"
+            onclick="togglePinMember('${member.id}')"
+            title="${memberPinned ? 'Unpin' : 'Pin to top'}"
+          >
+            <i data-lucide="pin" class="w-3.5 h-3.5 pointer-events-none"></i>
+          </button>
+          <div class="flex items-center space-x-2 pr-5">
+            <i data-lucide="grip-vertical" class="w-3.5 h-3.5 text-slate-300 flex-none cursor-grab opacity-0 group-hover:opacity-100" onmousedown="onRowHandleMouseDown(event, 'people', '${member.id}')" title="Drag to reorder"></i>
             <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white flex-none" style="background-color:${member.color || '#64748b'}" ondblclick="startInlineEdit(this, 'member', '${member.id}', 'avatar')" title="Double-click to edit initials">
               ${escapeHtml(member.avatar)}
             </div>
@@ -923,9 +1107,29 @@
       let rowHtml = `<div style="min-height:${rowH}px" class="flex border-b border-slate-200 relative bg-white hover:bg-slate-50/50 transition" data-row-type="projects" data-project-name="${escapeHtml(project.name)}">`;
 
       // Sidebar Cell
+      const projectPinned = project.name === state.pinnedProjectName;
       rowHtml += `
-        <div style="width: ${sideWidth}px;" class="flex-none p-3 border-r border-slate-200 bg-slate-50/80 flex flex-col justify-between sticky left-0 z-10">
-          <div class="flex items-center space-x-2.5">
+        <div style="width: ${sideWidth}px;" class="flex-none p-3 border-r border-slate-200 bg-slate-50/80 flex flex-col justify-between sticky left-0 z-10 relative group">
+          <div class="absolute top-1 right-1 flex items-center gap-0.5">
+            ${projectTasks.length === 0 ? `
+              <button
+                class="p-1 rounded hover:bg-slate-200 text-slate-300 opacity-0 group-hover:opacity-100"
+                onclick="deleteEmptyProject(this.closest('[data-project-name]').dataset.projectName)"
+                title="Remove empty project"
+              >
+                <i data-lucide="trash-2" class="w-3.5 h-3.5 pointer-events-none"></i>
+              </button>
+            ` : ''}
+            <button
+              class="p-1 rounded hover:bg-slate-200 ${projectPinned ? 'text-amber-500' : 'text-slate-300 opacity-0 group-hover:opacity-100'}"
+              onclick="togglePinProject(this.closest('[data-project-name]').dataset.projectName)"
+              title="${projectPinned ? 'Unpin' : 'Pin to top'}"
+            >
+              <i data-lucide="pin" class="w-3.5 h-3.5 pointer-events-none"></i>
+            </button>
+          </div>
+          <div class="flex items-center space-x-2 pr-5">
+            <i data-lucide="grip-vertical" class="w-3.5 h-3.5 text-slate-300 flex-none cursor-grab opacity-0 group-hover:opacity-100" onmousedown="onRowHandleMouseDown(event, 'projects', this.closest('[data-project-name]').dataset.projectName)" title="Drag to reorder"></i>
             <div class="w-8 h-8 rounded-lg flex items-center justify-center text-white flex-none" style="background-color:${project.color}">
               <i data-lucide="folder-kanban" class="w-4 h-4"></i>
             </div>
@@ -1106,11 +1310,13 @@
       dragType = 'holiday_create';
       dragStartIndex = index;
       dragCurrentIndex = index;
+      headerDidDrag = false;
       updateHeaderSelectionHighlights();
     }
 
     function onHeaderMouseEnter(index) {
       if (isSelecting && dragType === 'holiday_create') {
+        if (index !== dragCurrentIndex) headerDidDrag = true;
         dragCurrentIndex = index;
         updateHeaderSelectionHighlights();
       }
@@ -1202,6 +1408,24 @@
           }
           renderTimeline();
         }
+      } else if (dragType === 'row_reorder') {
+        const elementHovered = document.elementFromPoint(e.clientX, e.clientY);
+        const rowElem = elementHovered?.closest(`[data-row-type="${reorderView}"]`);
+        if (!rowElem) return;
+
+        if (reorderView === 'people') {
+          const targetId = rowElem.getAttribute('data-member-id');
+          if (targetId && targetId !== reorderId) {
+            moveInArray(state.members, m => m.id, reorderId, targetId);
+            renderTimeline();
+          }
+        } else {
+          const targetName = rowElem.getAttribute('data-project-name');
+          if (targetName && targetName !== reorderId) {
+            moveInArray(state.projectOrder, n => n, reorderId, targetName);
+            renderTimeline();
+          }
+        }
       }
     });
 
@@ -1223,12 +1447,16 @@
         const startDate = formatDate(addDays(curr, startIdx));
         const endDate = formatDate(addDays(curr, endIdx));
 
-        document.getElementById('holiday-start').value = startDate;
-        document.getElementById('holiday-end').value = endDate;
-        openHolidayModal();
+        if (headerDidDrag) {
+          document.getElementById('holiday-start').value = startDate;
+          document.getElementById('holiday-end').value = endDate;
+          openHolidayModal();
+        } else {
+          toggleDayOff(startDate);
+        }
       }
 
-      if (['task_move', 'task_resize_left', 'task_resize_right', 'deadline_move'].includes(dragType)) {
+      if (['task_move', 'task_resize_left', 'task_resize_right', 'deadline_move', 'row_reorder'].includes(dragType)) {
         saveState();
       }
 
@@ -1237,8 +1465,30 @@
       dragRowId = null;
       activeDraggingTaskId = null;
       activeDraggingDeadlineTaskId = null;
+      reorderView = null;
+      reorderId = null;
       clearHighlights();
     });
+
+    // Quick day-off toggle: a plain click (no drag) on a header. Only ever
+    // creates/removes a single-day entry it owns — a click landing inside an
+    // existing (possibly multi-day, named) holiday opens the modal instead,
+    // so it can't silently chew into something like "Christmas Break".
+    function toggleDayOff(dateStr) {
+      const idx = state.holidays.findIndex(h => h.start === dateStr && h.end === dateStr);
+      if (idx !== -1) {
+        state.holidays.splice(idx, 1);
+      } else if (state.holidays.some(h => dateStr >= h.start && dateStr <= h.end)) {
+        document.getElementById('holiday-start').value = dateStr;
+        document.getElementById('holiday-end').value = dateStr;
+        openHolidayModal();
+        return;
+      } else {
+        state.holidays.push({ title: 'Day Off', start: dateStr, end: dateStr });
+      }
+      saveState();
+      renderTimeline();
+    }
 
     function updateCellSelectionHighlights() {
       clearHighlights();
