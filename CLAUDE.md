@@ -19,6 +19,9 @@ in the code but aren't.
 - State lives in one `let state = {...}` object; persisted piecemeal to `localStorage`
   under keys `resource_mgr_tasks_v4`, `resource_mgr_holidays_v4`,
   `resource_mgr_vacations_v4`, `resource_mgr_settings_v4`, `resource_mgr_members_v4`.
+  `resource_mgr_settings_v4` also carries `pinnedMemberId`, `pinnedProjectName`,
+  `projectOrder`, and `emptyProjects` (see "Row order & pin" below) — it's a grab-bag
+  of small persisted flags, not just `workWeekends`.
 
 ## Load-bearing fixes — don't reintroduce these
 
@@ -50,6 +53,44 @@ in the code but aren't.
    persisted like everything else. Deleting a member with tasks assigned **requires**
    picking someone to reassign those tasks to first (blocks deletion if they're the
    only member) — don't let a delete path silently orphan `task.assigneeId`.
+
+## Row order, pin, and the "+" ghost rows
+
+- **Members reorder by mutating `state.members` itself** — the array order IS the
+  display order (no separate `order` field). Projects aren't a real entity, so their
+  order lives in `state.projectOrder` (an array of project-name strings), rebuilt
+  from the current on-screen order the moment a project drag starts (see
+  `onRowHandleMouseDown`) so untouched projects keep a stable position even before
+  they've ever been dragged.
+- **Pin is single-pin, per view** (`state.pinnedMemberId`, `state.pinnedProjectName`)
+  — deliberately chosen over multi-pin when this was built. If multi-pin is wanted
+  later, it needs its own sort key; don't just make `pinnedMemberId` an array without
+  rethinking `getOrderedMembers()`.
+- **Drag-to-reorder reuses the existing task-drag plumbing**: a grip icon's
+  `mousedown` sets `dragType = 'row_reorder'` (+ `reorderView`/`reorderId`), the
+  shared `window mousemove` listener moves the row live via `elementFromPoint` +
+  `moveInArray()`, `mouseup` persists. Same pattern as `task_move` — don't build a
+  parallel drag system for this.
+- **Project rows can now exist with zero tasks.** `state.emptyProjects` holds names
+  created via the "+ Add project" ghost row; `renderTimeline()` merges them into the
+  task-derived project list (deduped by name) so a project survives its first
+  bookingless moment instead of vanishing. An empty project's row shows a trash icon
+  to delete it — real (task-having) projects don't get one, since deleting *them*
+  would need to decide what happens to their tasks and that isn't built.
+- **The "+ Add person" / "+ Add project" ghost row is a single shared piece of UI**
+  (`renderAddRow`, `state.addingRow`) swapped for a text input on click; Enter
+  commits via `quickAddMember`/`quickAddProject`, Escape or blur-with-no-cancel-flag
+  handles the rest. `quickAddMember` intentionally skips the People modal (no
+  role/capacity/color prompt) — full editing still happens via the modal or
+  double-click-to-rename afterward.
+- **Header click is a quick day-off toggle, not always the Holidays modal.** A plain
+  click (no drag) on a date header creates/removes a single *exact* one-day
+  `{start,end}` holiday entry named "Day Off". Dragging across days (`headerDidDrag`)
+  still opens the full modal for a named range. A click that lands inside an
+  *existing* holiday that isn't itself a 1-day entry it could own also opens the
+  modal instead of mutating it — this is deliberate, so a stray single click can't
+  silently shrink or delete a named multi-day range like "Christmas Break". If you
+  touch `onHeaderMouseDown`/`toggleDayOff`, keep that guard.
 
 ## Established conventions (matches the sibling "OS" app's design language)
 - Double-click to rename in place: member name/role/avatar initials in the People
@@ -87,5 +128,20 @@ function bugs.
   design for the click-vs-dblclick race before attempting).
 - Any kind of backend/sync — currently single-browser, single-`localStorage`-origin
   only. No accounts, no multi-device.
+- Multi-pin (see "Row order, pin" above) — single-pin was the deliberate choice so far.
+- Deleting a project that actually has tasks (only empty, task-less projects are
+  deletable today, via the trash icon on their row).
 - Nothing else currently queued — ask before assuming a feature is wanted; this file
   reflects what's been decided, not a roadmap.
+
+## Testing note (this env specifically)
+Real Tailwind/Lucide CDN fetches are blocked by this sandbox's egress proxy policy
+(`cdn.tailwindcss.com`, `unpkg.com` both get `connect_rejected`) — Playwright/headless
+testing here needs `page.route()` stubs for both (empty `window.tailwind={config:{}}`
+and `window.lucide={createIcons(){}}`) rather than hitting the real CDNs. One
+consequence: with Tailwind stubbed out, none of its utility classes actually apply
+(no real CSS loaded), so pixel-coordinate-based interactions (e.g. dragging a small
+icon) become unreliable — prefer calling the handler function directly
+(`page.evaluate` with a fake event object) over clicking tiny elements by coordinate
+when testing in this environment. On a real deploy (Vercel, or any real browser with
+internet) both CDNs load normally and this doesn't apply.
