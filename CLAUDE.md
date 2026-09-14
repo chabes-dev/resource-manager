@@ -71,6 +71,36 @@ in the code but aren't.
    (`top: topOffset - 12`, flush with the card's top edge) — shows the exact
    deadline day without ever crossing into the card body. Don't reintroduce a
    full-height line.
+9. **The REAL Vacations/Holidays-button bug (the Lucide fix above was real but
+   wasn't the cause of this): the People modal's form markup had 2 unclosed
+   `<div>` tags** (a leftover `<div class="grid grid-cols-2 gap-3"><div>` that
+   should have been deleted when the layout became a 3-column grid, right above
+   it). Because of that, `#vacation-modal`, `#holiday-modal`, and everything else
+   after `#people-modal` in the HTML were nested *inside* `#people-modal`'s DOM
+   subtree instead of being its siblings — present since this file's very first
+   commit. While `#people-modal` carried `class="... hidden"` (its default,
+   unopened state), every element nested inside it — including the other two
+   modals — collapsed to a zero-size box, REGARDLESS of that element's own
+   classes. `openVacationModal()`/`openHolidayModal()` still correctly removed
+   `hidden` from their own element and `getComputedStyle().display` still read
+   `flex` — so anything checking `classList` or the element's own computed
+   `display` (exactly what earlier debugging here did) reported "it's open" while
+   the screen showed nothing. Only `getBoundingClientRect()` (or an actual
+   screenshot) exposed it: `{width: 0, height: 0}`. **Lesson for next time a
+   button "does nothing": check the element's actual rendered bounding box, not
+   just its own class list/display value — an ancestor can be hiding it.** Also:
+   this repo's own no-op-Tailwind-stub testing convention (see "Testing note"
+   below) never would have caught this either, since it's pure HTML structure,
+   not CSS — when a modal "isn't opening" is reported here again, compile the
+   real Tailwind output (`npx tailwindcss -i input.css -o output.css` against
+   this file, content glob pointed at it) and check a real bounding rect before
+   concluding the JS is fine.
+10. **Shift+click on a member's day cell toggles their personal vacation for
+    that single day** (`onCellMouseDown` checks `e.shiftKey` before starting the
+    task-create drag; `toggleVacationDay()` mirrors `toggleDayOff()`'s guard — it
+    only ever owns a single-day entry it created, a click inside an existing
+    multi-day vacation opens the Vacations modal instead of mutating it). Plain
+    click there is already task-create, so this couldn't be a bare click.
 
 ## Row order, pin, and the "+" ghost rows
 
@@ -173,3 +203,20 @@ icon) become unreliable — prefer calling the handler function directly
 (`page.evaluate` with a fake event object) over clicking tiny elements by coordinate
 when testing in this environment. On a real deploy (Vercel, or any real browser with
 internet) both CDNs load normally and this doesn't apply.
+
+**The no-op Tailwind stub is fine for logic tests but blind to real layout/CSS bugs**
+(see load-bearing fix #9 — a pure-HTML nesting bug that made two modals silently
+collapse to zero size). `npm install tailwindcss@3` works in this sandbox (the npm
+registry isn't blocked, only the CDN hosts are) — when a bug report is specifically
+about something not being *visible* (a modal, a dropdown, anything about layout
+rather than state), compile the real CSS and check actual `getBoundingClientRect()`
+/ take a screenshot, don't trust `classList`/computed-`display` checks alone:
+```
+mkdir -p /tmp/twtest && cd /tmp/twtest && npm init -y && npm install tailwindcss@3
+# tailwind.config.js: content: ["/path/to/index.html"]
+# input.css: @tailwind base; @tailwind components; @tailwind utilities;
+npx tailwindcss -i input.css -o output.css
+# then page.route the cdn.tailwindcss.com request to inject output.css as a
+# real <style> tag (plus `window.tailwind = {config:{}}` so the page's own
+# `tailwind.config = {...}` assignment doesn't throw) instead of a no-op stub.
+```
