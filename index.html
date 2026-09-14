@@ -75,11 +75,13 @@
       outline: 2px dashed #f43f5e;
     }
 
-    /* DEADLINE MARKERS */
+    /* DEADLINE MARKERS — a short pin above the task's own card, not a line
+       through it. Height is fixed (a stub above the card), never top:0/bottom:0
+       — a full-row line used to cut straight through whatever task sat under it,
+       including tasks in other lanes. See renderTaskBlock for the top offset. */
     .deadline-marker-client {
       position: absolute;
-      top: 0;
-      bottom: 0;
+      height: 12px;
       width: 2px;
       background-color: #ef4444;
       z-index: 25;
@@ -87,8 +89,7 @@
     }
     .deadline-marker-internal {
       position: absolute;
-      top: 0;
-      bottom: 0;
+      height: 12px;
       width: 2px;
       background-color: #f59e0b;
       z-index: 25;
@@ -514,6 +515,17 @@
       return String(str ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
 
+    // lucide.createIcons() sits mid-function in several places (e.g. inside
+    // renderHolidayList/renderVacationList/renderPeopleList, called *before* their
+    // modal gets unhidden). If the Lucide CDN script fails to load — ad blocker,
+    // flaky network, offline — an unguarded call throws and aborts everything after
+    // it, so the modal silently never opens. No visible error, just a dead button.
+    function safeCreateIcons() {
+      try {
+        if (window.lucide && typeof lucide.createIcons === 'function') lucide.createIcons();
+      } catch (e) { /* icon rendering is cosmetic — never let it block the UI */ }
+    }
+
     let state = {
       viewMode: 'people', // 'people' | 'projects'
       daysCount: 14,
@@ -851,7 +863,7 @@
 
       html += `</div>`;
       container.innerHTML = html;
-      lucide.createIcons();
+      safeCreateIcons();
     }
 
     // --- ROW ORDER / PIN ---
@@ -1243,13 +1255,16 @@
         if (deadlineIdx !== -1) {
           const deadlineLeft = (deadlineIdx * colWidth) + (colWidth / 2);
           const isClient = (task.deadlineType || 'CLIENT') === 'CLIENT';
+          // A short pin poking above this task's own card (its bottom edge flush
+          // with the card top), not a line running through the card body.
+          const deadlineTop = topOffset - 12;
 
           deadlineHtml = `
-            <div 
-              style="left: ${deadlineLeft}px;" 
+            <div
+              style="left: ${deadlineLeft}px; top: ${deadlineTop}px;"
               onmousedown="onDeadlineMouseDown(event, '${task.id}')"
               class="${isClient ? 'deadline-marker-client' : 'deadline-marker-internal'} pointer-events-auto"
-              title="Drag to change ${isClient ? 'Client' : 'Internal'} deadline"
+              title="Drag to change ${isClient ? 'Client' : 'Internal'} deadline (${task.deadlineDate})"
             >
               <div class="${isClient ? 'bg-rose-600' : 'bg-amber-500'} text-white p-0.5 rounded-full -ml-2 -mt-1 shadow flex items-center justify-center w-4 h-4">
                 <i data-lucide="${isClient ? 'flag' : 'diamond'}" class="w-2.5 h-2.5"></i>
@@ -1265,8 +1280,8 @@
           id="task-block-${task.id}"
           onmousedown="onTaskMouseDown(event, '${task.id}')"
           onclick="onTaskClick(event, '${task.id}')"
-          style="left: ${leftOffset}px; top: ${topOffset}px; width: ${blockWidth}px; border-left-color: ${task.color};" 
-          class="absolute h-16 pointer-events-auto bg-white hover:bg-slate-50 border-l-4 rounded-r-lg border-y border-r border-slate-300 p-2 shadow cursor-grab transition-shadow flex flex-col justify-between group z-10 hover:z-20"
+          style="left: ${leftOffset}px; top: ${topOffset}px; width: ${blockWidth}px; border-left-color: ${task.color}; background-color: ${task.color}22;"
+          class="absolute h-16 pointer-events-auto border-l-4 rounded-r-lg border-y border-r border-slate-300 p-2 shadow cursor-grab transition-shadow flex flex-col justify-between group z-10 hover:z-20"
         >
           <!-- Left Resize Handle -->
           <div onmousedown="onResizeMouseDown(event, '${task.id}', 'left')" class="resize-handle-left hover:bg-emerald-500/30 rounded-l"></div>
@@ -1696,7 +1711,7 @@
       renderPeopleList();
       document.getElementById('person-delete-confirm').innerHTML = '';
       document.getElementById('people-modal').classList.remove('hidden');
-      lucide.createIcons();
+      safeCreateIcons();
     }
 
     function closePeopleModal() {
@@ -1877,7 +1892,7 @@
           </div>
         `;
       }).join('');
-      lucide.createIcons();
+      safeCreateIcons();
     }
 
     function openVacationModal() {
@@ -1926,7 +1941,7 @@
           </div>
         `;
       }).join('');
-      lucide.createIcons();
+      safeCreateIcons();
     }
 
     function removeVacation(index) {
@@ -1981,7 +1996,7 @@
           </button>
         </div>
       `).join('');
-      lucide.createIcons();
+      safeCreateIcons();
     }
 
     function addHolidayForm(event) {

@@ -53,6 +53,24 @@ in the code but aren't.
    persisted like everything else. Deleting a member with tasks assigned **requires**
    picking someone to reassign those tasks to first (blocks deletion if they're the
    only member) — don't let a delete path silently orphan `task.assigneeId`.
+7. **A blocked Lucide CDN used to silently break buttons.** `openVacationModal` /
+   `openHolidayModal` / `openPeopleModal` all call a `renderXList()` helper — which
+   calls `lucide.createIcons()` — *before* unhiding their modal. If `lucide` isn't
+   defined (ad blocker, flaky network, offline demo — `unpkg.com` blocked, same as
+   this repo's own sandboxed test env), the unguarded call threw and aborted the rest
+   of the function, so the modal just never appeared. No console-visible error to a
+   normal user — it looked like the button did nothing. Fixed by routing every
+   `lucide.createIcons()` call through `safeCreateIcons()` (swallows the error,
+   icons degrade to blank, everything else still runs). **Always call
+   `safeCreateIcons()`, never `lucide.createIcons()` directly** — grep for
+   `lucide.createIcons()` before adding a new call site.
+8. **The deadline marker used to be a full-row-height vertical line** (`top:0;
+   bottom:0` in the row-overlay), so it visually cut through whatever task card
+   happened to sit at that x-position — including tasks in *other* lanes, not just
+   its own. Now it's a fixed 12px "pin" anchored just above its own task's card
+   (`top: topOffset - 12`, flush with the card's top edge) — shows the exact
+   deadline day without ever crossing into the card body. Don't reintroduce a
+   full-height line.
 
 ## Row order, pin, and the "+" ghost rows
 
@@ -113,6 +131,16 @@ in the code but aren't.
 - Each team member gets a color from `PERSON_PALETTE` (rotates on add, overridable via
   a color swatch in the People form) — used for their avatar, not for task-block color
   (tasks keep their own independent `task.color`).
+- Task cards fill with a light tint of `task.color` (inline `background-color:
+  ${task.color}22` — 6-digit hex + 2-digit alpha, ~13%), not `bg-white`. Assumes
+  `task.color` is always a 6-digit `#rrggbb` hex (true everywhere it's set today);
+  if that ever stops holding, the alpha-suffix trick breaks silently.
+- Company-wide days off (`state.holidays`, "Holidays" button) and one person's days
+  off (`state.vacations`, "Vacations" button) are two separate, deliberately
+  different features — not a bug that there are two. Holidays got a fast single-click
+  header toggle (see "Header click is a quick day-off toggle" above); Vacations is
+  still modal-only (pick member + date range). If a faster per-person toggle gets
+  built, it can't be a plain click on a day cell — that's already task-create.
 
 ## Verifying changes
 No test suite. The habit that's caught every real bug so far: after touching
