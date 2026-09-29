@@ -931,17 +931,14 @@
       renderTimeline();
     }
 
-    // Status lives on tasks (project.status is just read off the first task with
-    // that project name), so changing it for "the project" means cascading to
-    // every task under that name — same idea as renaming. A task-less project has
-    // no task to hold it, so that case is kept in emptyProjectStatus instead.
+    // Only reachable for a task-less project — a real project's tasks can each
+    // be at their own stage (one Done, one still Active), so there is no single
+    // "project status" to set once it has tasks; the status dropdown only
+    // renders here in the first place when projectTasks.length === 0 (see
+    // renderProjectRow). Editing a real task's status happens on that task,
+    // via its own modal — not here, and never cascaded across the project.
     function updateProjectStatus(projectName, newStatus) {
-      const hasTasks = state.tasks.some(t => t.project === projectName);
-      if (hasTasks) {
-        state.tasks.forEach(t => { if (t.project === projectName) t.projectStatus = newStatus; });
-      } else {
-        state.emptyProjectStatus[projectName] = newStatus;
-      }
+      state.emptyProjectStatus[projectName] = newStatus;
       saveState();
       renderTimeline();
     }
@@ -1146,6 +1143,26 @@
         'Done': 'bg-indigo-100 text-indigo-800 border-indigo-300'
       };
       const statusClass = statusColors[project.status] || statusColors['Active'];
+      const statusDots = {
+        'Active': 'bg-emerald-500',
+        'Follow Up': 'bg-amber-500',
+        'On Hold': 'bg-slate-400',
+        'Done': 'bg-indigo-500'
+      };
+      // A project's real tasks can each be at a different stage (one Done, one
+      // still Active, one On Hold) — that's normal, not noise to flatten. So
+      // this is a read-only breakdown, not a single editable value: editing
+      // status happens per-task (open the task, same field it always had).
+      // Only a task-less project (nothing to break down) still gets the
+      // single editable dropdown, via updateProjectStatus's emptyProjectStatus
+      // branch — see the "Row order, pin" section of this file for why cascading
+      // a single status onto every task was tried and reverted.
+      const statusCounts = {};
+      projectTasks.forEach(t => {
+        const s = t.projectStatus || 'Active';
+        statusCounts[s] = (statusCounts[s] || 0) + 1;
+      });
+      const statusBreakdownTitle = Object.entries(statusCounts).map(([s, c]) => `${c} ${s}`).join(', ');
 
       let rowHtml = `<div style="min-height:${rowH}px" class="flex border-b border-slate-200 relative bg-white hover:bg-slate-50/50 transition" data-row-type="projects" data-project-name="${escapeHtml(project.name)}">`;
 
@@ -1178,18 +1195,29 @@
             </div>
             <div class="min-w-0">
               <div class="text-xs font-bold text-slate-800 truncate" data-project-name="${escapeHtml(project.name)}" ondblclick="startInlineEditProjectName(this)" title="Double-click to rename">${escapeHtml(project.name)}</div>
-              <div class="relative inline-block">
-                <select
-                  onchange="updateProjectStatus(this.closest('[data-project-name]').dataset.projectName, this.value)"
-                  onmousedown="event.stopPropagation()"
-                  class="appearance-none text-[9px] font-semibold pl-1.5 pr-4 py-0.5 rounded border cursor-pointer focus:outline-none ${statusClass}"
-                  style="background-image:none;"
-                  title="Change project status (applies to every task in this project)"
-                >
-                  ${Object.keys(statusColors).map(s => `<option value="${s}" ${s === project.status ? 'selected' : ''}>${s}</option>`).join('')}
-                </select>
-                <i data-lucide="chevron-down" class="w-2.5 h-2.5 absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none"></i>
-              </div>
+              ${projectTasks.length === 0 ? `
+                <div class="relative inline-block">
+                  <select
+                    onchange="updateProjectStatus(this.closest('[data-project-name]').dataset.projectName, this.value)"
+                    onmousedown="event.stopPropagation()"
+                    class="appearance-none text-[9px] font-semibold pl-1.5 pr-4 py-0.5 rounded border cursor-pointer focus:outline-none ${statusClass}"
+                    style="background-image:none;"
+                    title="Status for when this project gets its first task"
+                  >
+                    ${Object.keys(statusColors).map(s => `<option value="${s}" ${s === project.status ? 'selected' : ''}>${s}</option>`).join('')}
+                  </select>
+                  <i data-lucide="chevron-down" class="w-2.5 h-2.5 absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+                </div>
+              ` : `
+                <div class="flex items-center gap-1.5 pt-0.5" title="${escapeHtml(statusBreakdownTitle)} — click a task to change its status">
+                  ${Object.entries(statusCounts).map(([s, c]) => `
+                    <span class="inline-flex items-center gap-0.5">
+                      <i class="w-1.5 h-1.5 rounded-full ${statusDots[s] || 'bg-slate-400'} inline-block"></i>
+                      <span class="text-[9px] font-semibold text-slate-600">${c}</span>
+                    </span>
+                  `).join('')}
+                </div>
+              `}
             </div>
           </div>
           <div class="text-[10px] text-slate-500 flex items-center justify-between pt-2 border-t border-slate-200">

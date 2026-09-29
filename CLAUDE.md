@@ -101,24 +101,36 @@ in the code but aren't.
     only ever owns a single-day entry it created, a click inside an existing
     multi-day vacation opens the Vacations modal instead of mutating it). Plain
     click there is already task-create, so this couldn't be a bare click.
-11. **Project status is editable from Project View** — the status badge is a
-    real `<select>` now (`updateProjectStatus`), not a read-only `<span>`. Since
-    "project" isn't a real entity, `project.status` is just read off the first
-    task matching that project name (see `renderTimeline`'s projects array
-    build) — so "changing the project's status" actually means cascading
-    `projectStatus` across *every* task under that name, same idea as renaming.
-    A task-less project (from the "+ Add project" ghost row) has no task to
-    hold it, so that case falls back to `state.emptyProjectStatus[name]`
-    instead — checked first at render time, otherwise the row would silently
-    snap back to "Active" the moment you picked something else. Fixed the same
-    bug class while here: renaming a project (`startInlineEditProjectName`)
-    only ever touched `state.tasks` — for a task-less project that's zero
-    tasks, so the rename silently did nothing to `emptyProjects`/`projectOrder`/
-    `pinnedProjectName`/`emptyProjectStatus`, leaving a stale entry under the
-    old name. Now rename updates all four. **Any future per-project-name state
-    added here needs the same treatment in both `startInlineEditProjectName`
-    and `deleteEmptyProject`** — a task-less project's identity lives entirely
-    in these name-keyed spots, nowhere else.
+11. **Project status is a read-only breakdown in Project View, NOT a single
+    editable value — a cascading-dropdown version of this was tried and
+    reverted.** First attempt: made the status badge a real `<select>` that,
+    on change, cascaded `projectStatus` across *every* task under that project
+    name (mirroring how rename already cascades). That's wrong: a project's
+    tasks legitimately sit at different stages at once (one Done, one still
+    Active, one On Hold) — cascading force-overwrote that mix the instant you
+    touched the dropdown, destroying real data. Since "project" isn't a real
+    entity, there is no single correct "project status" to set once it has
+    tasks — only per-task status, which already has a perfectly good editable
+    home (the task's own modal, `task-project-status`). So for a project WITH
+    tasks (`projectTasks.length > 0`), the sidebar now shows a **read-only**
+    breakdown — one small colored dot + count per distinct status present
+    (`statusCounts`, `statusDots` in `renderProjectRow`) — and status is edited
+    per-task only, never from the project row.
+    A task-less project (from the "+ Add project" ghost row) is the one
+    exception that still gets the single editable `<select>` — there's no task
+    yet to have a mix, so a single value is genuinely correct there. Its value
+    lives in `state.emptyProjectStatus[name]` (checked first at render time,
+    since there's no task to read it off of) via `updateProjectStatus`, which
+    is now ONLY reachable from that empty-project select — don't wire it back
+    up to a real project's status without re-reading this note.
+    Fixed an adjacent bug while first building this: renaming a project
+    (`startInlineEditProjectName`) only ever touched `state.tasks` — for a
+    task-less project that's zero tasks, so the rename silently did nothing to
+    `emptyProjects`/`projectOrder`/`pinnedProjectName`/`emptyProjectStatus`,
+    leaving a stale entry under the old name. Rename now updates all four.
+    **Any future per-project-name state added here needs the same treatment in
+    both `startInlineEditProjectName` and `deleteEmptyProject`** — a task-less
+    project's identity lives entirely in these name-keyed spots, nowhere else.
 
 ## Row order, pin, and the "+" ghost rows
 
