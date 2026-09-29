@@ -101,6 +101,24 @@ in the code but aren't.
     only ever owns a single-day entry it created, a click inside an existing
     multi-day vacation opens the Vacations modal instead of mutating it). Plain
     click there is already task-create, so this couldn't be a bare click.
+11. **Project status is editable from Project View** — the status badge is a
+    real `<select>` now (`updateProjectStatus`), not a read-only `<span>`. Since
+    "project" isn't a real entity, `project.status` is just read off the first
+    task matching that project name (see `renderTimeline`'s projects array
+    build) — so "changing the project's status" actually means cascading
+    `projectStatus` across *every* task under that name, same idea as renaming.
+    A task-less project (from the "+ Add project" ghost row) has no task to
+    hold it, so that case falls back to `state.emptyProjectStatus[name]`
+    instead — checked first at render time, otherwise the row would silently
+    snap back to "Active" the moment you picked something else. Fixed the same
+    bug class while here: renaming a project (`startInlineEditProjectName`)
+    only ever touched `state.tasks` — for a task-less project that's zero
+    tasks, so the rename silently did nothing to `emptyProjects`/`projectOrder`/
+    `pinnedProjectName`/`emptyProjectStatus`, leaving a stale entry under the
+    old name. Now rename updates all four. **Any future per-project-name state
+    added here needs the same treatment in both `startInlineEditProjectName`
+    and `deleteEmptyProject`** — a task-less project's identity lives entirely
+    in these name-keyed spots, nowhere else.
 
 ## Row order, pin, and the "+" ghost rows
 

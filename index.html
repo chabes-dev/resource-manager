@@ -546,6 +546,10 @@
       // A name added here via the "+ Add project" row survives with zero
       // bookings until a task gives it one (harmless overlap, deduped at render).
       emptyProjects: [],
+      // Status for a task-less project (see updateProjectStatus) — a populated
+      // project's status lives on its tasks instead, this only covers the gap
+      // where there's no task to hold it.
+      emptyProjectStatus: {},
       addingRow: null // 'people' | 'projects' while the "+" ghost row is showing its input
     };
 
@@ -617,6 +621,16 @@
         const newName = el.textContent.trim();
         if (!newName || newName === oldName) { renderTimeline(); return; }
         state.tasks.forEach(t => { if (t.project === oldName) t.project = newName; });
+        // A task-less project's identity lives in these name-keyed spots instead
+        // of on a task — rename has to follow it there too, or the row silently
+        // reverts to its old name (or a stale pin/order entry points nowhere).
+        state.emptyProjects = state.emptyProjects.map(n => n === oldName ? newName : n);
+        state.projectOrder = state.projectOrder.map(n => n === oldName ? newName : n);
+        if (state.pinnedProjectName === oldName) state.pinnedProjectName = newName;
+        if (Object.prototype.hasOwnProperty.call(state.emptyProjectStatus, oldName)) {
+          state.emptyProjectStatus[newName] = state.emptyProjectStatus[oldName];
+          delete state.emptyProjectStatus[oldName];
+        }
         saveState();
         renderTimeline();
       };
@@ -681,6 +695,7 @@
         state.pinnedProjectName = s.pinnedProjectName || null;
         state.projectOrder = s.projectOrder || [];
         state.emptyProjects = s.emptyProjects || [];
+        state.emptyProjectStatus = s.emptyProjectStatus || {};
       }
 
       if (savedMembers) {
@@ -742,7 +757,8 @@
         pinnedMemberId: state.pinnedMemberId,
         pinnedProjectName: state.pinnedProjectName,
         projectOrder: state.projectOrder,
-        emptyProjects: state.emptyProjects
+        emptyProjects: state.emptyProjects,
+        emptyProjectStatus: state.emptyProjectStatus
       }));
       localStorage.setItem('resource_mgr_members_v4', JSON.stringify(state.members));
     }
@@ -846,7 +862,7 @@
         // Task-less projects created via "+ Add project" — dropped once a real
         // task gives them a name already in derivedNames, to avoid duplicates.
         state.emptyProjects.filter(name => !derivedNames.has(name)).forEach(name => {
-          projects.push({ name, color: '#64748b', status: 'Active' });
+          projects.push({ name, color: '#64748b', status: state.emptyProjectStatus[name] || 'Active' });
         });
 
         if (projects.length === 0) {
@@ -910,6 +926,22 @@
       state.emptyProjects = state.emptyProjects.filter(n => n !== name);
       state.projectOrder = state.projectOrder.filter(n => n !== name);
       if (state.pinnedProjectName === name) state.pinnedProjectName = null;
+      delete state.emptyProjectStatus[name];
+      saveState();
+      renderTimeline();
+    }
+
+    // Status lives on tasks (project.status is just read off the first task with
+    // that project name), so changing it for "the project" means cascading to
+    // every task under that name — same idea as renaming. A task-less project has
+    // no task to hold it, so that case is kept in emptyProjectStatus instead.
+    function updateProjectStatus(projectName, newStatus) {
+      const hasTasks = state.tasks.some(t => t.project === projectName);
+      if (hasTasks) {
+        state.tasks.forEach(t => { if (t.project === projectName) t.projectStatus = newStatus; });
+      } else {
+        state.emptyProjectStatus[projectName] = newStatus;
+      }
       saveState();
       renderTimeline();
     }
@@ -1146,7 +1178,18 @@
             </div>
             <div class="min-w-0">
               <div class="text-xs font-bold text-slate-800 truncate" data-project-name="${escapeHtml(project.name)}" ondblclick="startInlineEditProjectName(this)" title="Double-click to rename">${escapeHtml(project.name)}</div>
-              <span class="text-[9px] font-semibold px-1.5 py-0.5 rounded border ${statusClass}">${escapeHtml(project.status)}</span>
+              <div class="relative inline-block">
+                <select
+                  onchange="updateProjectStatus(this.closest('[data-project-name]').dataset.projectName, this.value)"
+                  onmousedown="event.stopPropagation()"
+                  class="appearance-none text-[9px] font-semibold pl-1.5 pr-4 py-0.5 rounded border cursor-pointer focus:outline-none ${statusClass}"
+                  style="background-image:none;"
+                  title="Change project status (applies to every task in this project)"
+                >
+                  ${Object.keys(statusColors).map(s => `<option value="${s}" ${s === project.status ? 'selected' : ''}>${s}</option>`).join('')}
+                </select>
+                <i data-lucide="chevron-down" class="w-2.5 h-2.5 absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+              </div>
             </div>
           </div>
           <div class="text-[10px] text-slate-500 flex items-center justify-between pt-2 border-t border-slate-200">
